@@ -1,0 +1,5 @@
+__version__ = "0.0.1"
+
+GUILD_ID = 1095850806990868541
+# TODO: Update from Temp Guild Id
+# LUNA_GUILD_ID = 964372169511559228  
