@@ -1,8 +1,6 @@
-# TODO: Add Custom vs Default Mode
 # TODO: Add /Main Command for individual users
 # TODO: Add Redundancies to prevent people tracking others events
 # TODO: Add /Special Roles command
-# TODO: Ensure 🔔 icon is the first emote
 # TODO: Order Users by Signup Order
 # FEATURE REQUEST: Sample Roster
 # FEATURE REQUEST: DM Sign ups before event
@@ -11,7 +9,8 @@
 import lightbulb
 import hikari
 import pytz
-from typing import TypedDict
+import concurrent.futures
+from typing import TypedDict, Dict
 from pytz import timezone
 from datetime import datetime, timedelta
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -24,13 +23,14 @@ class DefaultEmoji(TypedDict):
     emoji: hikari.Emoji
 
 class ForumEvent:
-    def __init__(self, channel: hikari.GuildChannel, message: hikari.Message, event: hikari.GuildEvent, custom: bool, event_timeout: datetime, tracking_timeout: datetime):
+    def __init__(self, channel: hikari.GuildChannel, message: hikari.Message, event: hikari.GuildEvent, custom: bool, roster_cache: Dict[str,str], event_timeout: datetime, tracking_timeout: datetime):
         self.channel = channel
         self.message = message
         self.event = event
         self.custom = custom
         self.event_timeout = event_timeout
         self.tracking_timeout = tracking_timeout
+        self.roster_cache = roster_cache
     
 SERVER_TIME_OFFSET = timedelta(hours=4)
 EMOJI_IDS = [
@@ -63,6 +63,23 @@ async def check_old_events() -> None:
     for key in to_remove:
         tracked_channel_ids.pop(key)
         await mod_plugin.bot.rest.create_message(key, f"<#{key}> | Event signup period has ended.")
+
+@sched.scheduled_job(CronTrigger(minute="*/5"))
+async def update_roster() -> None:
+    print(tracked_channel_ids)
+    
+    for forum_event in tracked_channel_ids.values():
+        await updateInterestedUsers(channel_id=forum_event.channel.id, message_id=forum_event.message.id)
+        print(forum_event)
+        print(forum_event.roster_cache)
+        print(emoji_dict)
+        for emoji in emoji_dict.values() :
+            if emoji["emoji"] == "🔔":
+                continue
+            user_mentions = await fetch_emoji_info(forum_event, emoji)
+            print(user_mentions)
+            forum_event.roster_cache.update({str(emoji["id"]): user_mentions})
+        print(forum_event.roster_cache)
 
 @mod_plugin.listener(hikari.ReactionEvent)
 async def print_reaction(event: hikari.ReactionEvent) -> None:
@@ -118,6 +135,10 @@ async def updateInterestedUsers(channel_id: str, message_id: str):
     interested_users.update({channel_id: users})
     # print(interested_users)
 
+async def add_reaction(channel_id: str, message_id: str, emoji_name, emoji_id, emoji) -> None :
+    await mod_plugin.bot.rest.add_reaction(channel=channel_id, message=message_id, emoji=emoji)
+    saved_emoji = DefaultEmoji(name=emoji_name, id=emoji_id, emoji=emoji)
+    emoji_dict.update({emoji_id: saved_emoji})
 
 @mod_plugin.command
 @lightbulb.option(
@@ -153,13 +174,6 @@ async def track_post(ctx: lightbulb.Context) -> None:
     
     event_time = (datetime.now() + timedelta(days=ctx.options.timeout)).replace(tzinfo=pytz.UTC)
     
-    # if ctx.options.message_id : 
-    #     ctx.options.message_id = ctx.options.message_id
-    # else :
-    #     messages = await mod_plugin.bot.rest.fetch_messages(channel=ctx.channel_id)
-    #     messages.sort(key=lambda x: x.created_at)
-    #     message_id = messages[0].id
-    
     channel = await mod_plugin.bot.rest.fetch_channel(channel=ctx.channel_id)
     message = await mod_plugin.bot.rest.fetch_message(channel=ctx.channel_id, message=ctx.options.message_id)
     event = None
@@ -168,19 +182,17 @@ async def track_post(ctx: lightbulb.Context) -> None:
         event = await mod_plugin.bot.rest.fetch_scheduled_event(ctx.guild_id,ctx.options.event_id)
         event_time = event.start_time.replace(tzinfo=pytz.UTC) - SERVER_TIME_OFFSET
     
-    tracking_event = ForumEvent(channel, message, event, ctx.options.custom, event_time, timeout)    
+    roster_cache = {}
+    tracking_event = ForumEvent(channel, message, event, ctx.options.custom, roster_cache, event_time, timeout)
+    
     tracked_channel_ids.update({ctx.channel_id: tracking_event})
     
+    await response.edit("Adding Emojis to Message...")
+    
     if not ctx.options.custom :
-        await mod_plugin.bot.rest.add_reaction(channel=ctx.channel_id, message=ctx.options.message_id, emoji="🔔")
-        saved_emoji = DefaultEmoji(name="Interested", id="🔔", emoji="🔔")
-        emoji_dict.update({"🔔": saved_emoji})
-        await mod_plugin.bot.rest.add_reaction(channel=ctx.channel_id, message=ctx.options.message_id, emoji="🆕")
-        saved_emoji = DefaultEmoji(name="New", id="🆕", emoji="🆕")
-        emoji_dict.update({"🆕": saved_emoji})
-        await mod_plugin.bot.rest.add_reaction(channel=ctx.channel_id, message=ctx.options.message_id, emoji="⭐")
-        saved_emoji = DefaultEmoji(name="Filler", id="⭐", emoji="⭐")
-        emoji_dict.update({"⭐": saved_emoji})
+        await add_reaction(channel_id=ctx.channel_id, message_id=ctx.options.message_id, emoji_name="Interested", emoji_id="🔔", emoji="🔔")
+        await add_reaction(channel_id=ctx.channel_id, message_id=ctx.options.message_id, emoji_name="New", emoji_id="🆕", emoji="🆕")
+        await add_reaction(channel_id=ctx.channel_id, message_id=ctx.options.message_id, emoji_name="Filler", emoji_id="⭐", emoji="⭐")
         
         emojis = await mod_plugin.bot.rest.fetch_guild_emojis(guild=GUILD_ID)
         # print(emojis)
@@ -193,8 +205,13 @@ async def track_post(ctx: lightbulb.Context) -> None:
             emoji = emoji_dict.get(str(emoji_id))
             await mod_plugin.bot.rest.add_reaction(channel=ctx.channel_id, message=ctx.options.message_id, emoji=emoji["emoji"])
     
+    await response.edit("Verifying Already Interested Users...")
     
     await updateInterestedUsers(channel_id=ctx.channel_id, message_id=ctx.options.message_id)
+    
+    await response.edit("Building Roster Cache...")
+    
+    await update_roster()
     
     response_message = f"Successfully Tracking https://discord.com/channels/{ctx.guild_id}/{ctx.channel_id}/{ctx.options.message_id}"
     if event :
@@ -209,35 +226,36 @@ def sorting_algorithm(x):
     else :
         return x.emoji
 
+async def fetch_emoji_info(forum_event, emoji):
+    emoji_link = emoji["emoji"]
+    print(emoji_link)
+    print(interested_users[forum_event.channel.id])
+    users = await mod_plugin.bot.rest.fetch_reactions_for_emoji(forum_event.channel.id, message=forum_event.message.id, emoji=emoji_link)
+    user_mentions = ""
+    for user in users :
+        if user not in interested_users[forum_event.channel.id] :
+            continue;
+        
+        if user_mentions == "" :
+            user_mentions = user.mention
+        else :
+            user_mentions = f"{user_mentions}, {user.mention}"
+        
+    user_mentions = user_mentions if user_mentions != "" else "N/A"
+    # reaction_name = emoji["name"].upper().replace("_", " ")
+    return user_mentions
+
 async def createEmbedForReaction(ctx: lightbulb.Context, forum_event: ForumEvent) -> hikari.Embed:
     embed = hikari.Embed(title="PRE-ROSTER",color= "#949fe6")
-    # valid_users = []
-    
-    # for emoji in emoji_dict.values() :
-    #     if emoji["name"] != "🔔":
-    #         continue
-        
-    #     valid_users = await mod_plugin.bot.rest.fetch_reactions_for_emoji(channel=ctx.channel_id, message=messageId, emoji=reaction.emoji)
-            
     for emoji in emoji_dict.values() :
         if emoji["emoji"] == "🔔":
             continue
-        
+        user_mentions = forum_event.roster_cache.get(str(emoji["id"]))
+        print(user_mentions)
         emoji_link = emoji["emoji"]
         print(emoji_link)
-        users = await mod_plugin.bot.rest.fetch_reactions_for_emoji(forum_event.channel.id, message=forum_event.message.id, emoji=emoji_link)
-        user_mentions = ""
-        for user in users :
-            if user not in interested_users[forum_event.channel.id] :
-                continue;
-            
-            if user_mentions == "" :
-                user_mentions = user.mention
-            else :
-                user_mentions = f"{user_mentions}, {user.mention}"
-        
-        user_mentions = user_mentions if user_mentions != "" else "N/A"
         reaction_name = emoji["name"].upper().replace("_", " ")
+        print(reaction_name)
         embed.add_field(f"{emoji_link} | {reaction_name}", user_mentions)
     embed.set_footer("Message Mods/Admins if you need more help")
     return embed
@@ -254,7 +272,6 @@ async def check_roster(ctx: lightbulb.Context) -> None:
         return
     
     response = await ctx.respond(hikari.Embed(title="Fetching Pre-Roster..."),flags=hikari.MessageFlag.EPHEMERAL)
-    # message = await mod_plugin.bot.rest.fetch_message(message=event[0], channel=ctx.channel_id)
     embed = await createEmbedForReaction(ctx, event)
     await response.edit(embed=embed)
 
