@@ -138,31 +138,41 @@ async def add_reaction(channel_id: str, message_id: str, emoji_name, emoji_id, e
     saved_emoji = DefaultEmoji(name=emoji_name, id=emoji_id, emoji=emoji)
     emoji_dict.update({emoji_id: saved_emoji})
 
-async def print_tracking_stages(tracking_stage, emoji_stage, interested_user_stage, roster_cache_stage, message: str) -> hikari.Embed:
-    divider = "`                                        `"
+async def print_tracking_stages(timestamp, tracking_stage, reaction_stage, interested_stage, roster_cache_stage, message: str) -> hikari.Embed:
+    total_progress_amount = calc_total_progress(tracking_stage, reaction_stage, interested_stage, roster_cache_stage)
+    
     embed = hikari.Embed(title="Registering Event For Tracking...",color="#949fe6")
+    
     embed.add_field(f"{tracking_stage[0]} | Building Tracking Info...", tracking_stage[1])
     progress_state = 0 + (3 if tracking_stage[0] == "✅" else 0)
 
-    embed.add_field(f"{emoji_stage[0]} | Adding Emojis to Message...", emoji_stage[1])
-    progress_state += 7 if emoji_stage[0] == "✅" else 0
+    embed.add_field(f"{reaction_stage[0]} | Adding Emojis to Message...", reaction_stage[1])
+    progress_state += 7 if reaction_stage[0] == "✅" else 0
     
-    embed.add_field(f"{interested_user_stage[0]} | Verifying Already Interested Users...", interested_user_stage[1])
-    progress_state += 2 if interested_user_stage[0] == "✅" else 0
+    embed.add_field(f"{interested_stage[0]} | Verifying Already Interested Users...", interested_stage[1])
+    progress_state += 2 if interested_stage[0] == "✅" else 0
     
     embed.add_field(f"{roster_cache_stage[0]} | Building Roster Cache...", roster_cache_stage[1])
     progress_state += 13 if roster_cache_stage[0] == "✅" else 0
-    discord_timestamp = generate_discord_timestamp(datetime.now())
     if roster_cache_stage[0] != "✅":
         emoji_link = red_x_emoji["emoji"]
         embed.add_field(f"{emoji_link} | Working on Registering Event for Tracking.", message)
     else: 
         embed.add_field("✅ | Finished Registering Event for Tracking.", message)
-    progress_bar = build_progress_bar(progress_state=progress_state, max_state=PROGRESS_BAR_LENGTH)
     
-    embed.add_field(progress_bar, f"Last update processed <t:{discord_timestamp}:R>")
+    progress_bar = build_progress_bar(progress_state=total_progress_amount, max_state=PROGRESS_BAR_LENGTH)
+    
+    embed.add_field(progress_bar, f"Last update processed <t:{timestamp}:R>")
 
     return embed
+
+def calc_total_progress(tracking_stage, reaction_stage, interested_stage, roster_cache_stage):
+    tracking_progress_amount = int(tracking_stage[1].count('▓'))
+    reaction_progress_amount = int(reaction_stage[1].count('▓'))
+    interested_progress_amount = int(interested_stage[1].count('▓'))
+    roster_progress_amount = int(roster_cache_stage[1].count('▓'))
+    total_progress_amount = int(((tracking_progress_amount + reaction_progress_amount + interested_progress_amount + roster_progress_amount) / (PROGRESS_BAR_LENGTH * 4)) * PROGRESS_BAR_LENGTH)
+    return total_progress_amount
 
 def build_progress_bar(progress_state, max_state):
     progress_bar = "" #31 long
@@ -176,7 +186,7 @@ def build_progress_bar(progress_state, max_state):
 def generate_discord_timestamp(date_time: datetime):
     return calendar.timegm(date_time.utcnow().utctimetuple())
 
-async def add_reactions_to_post(ctx, response_message, response, embed, tracking,reaction,verify,roster):
+async def add_reactions_to_post(ctx, timestamp, message_id, response_message, response, embed, tracking,reaction,verify,roster):
     
     if ctx.options.custom:
         return
@@ -184,9 +194,9 @@ async def add_reactions_to_post(ctx, response_message, response, embed, tracking
     reaction_progress = 0
     current_progress = 0
     
-    await add_reaction(channel_id=ctx.channel_id, message_id=ctx.options.message_id, emoji_name="Interested", emoji_id="🔔", emoji="🔔")
-    await add_reaction(channel_id=ctx.channel_id, message_id=ctx.options.message_id, emoji_name="New", emoji_id="🆕", emoji="🆕")
-    await add_reaction(channel_id=ctx.channel_id, message_id=ctx.options.message_id, emoji_name="Filler", emoji_id="⭐", emoji="⭐")
+    await add_reaction(channel_id=ctx.channel_id, message_id=message_id, emoji_name="Interested", emoji_id="🔔", emoji="🔔")
+    await add_reaction(channel_id=ctx.channel_id, message_id=message_id, emoji_name="New", emoji_id="🆕", emoji="🆕")
+    await add_reaction(channel_id=ctx.channel_id, message_id=message_id, emoji_name="Filler", emoji_id="⭐", emoji="⭐")
     current_progress = 3
 
     emojis = await mod_plugin.bot.rest.fetch_guild_emojis(guild=GUILD_ID)
@@ -197,27 +207,27 @@ async def add_reactions_to_post(ctx, response_message, response, embed, tracking
     
     reaction_progress = (current_progress * PROGRESS_BAR_LENGTH) / (len(emoji_dict.values())+3)
     reaction = [red_x_emoji["emoji"],build_progress_bar(int(reaction_progress),PROGRESS_BAR_LENGTH)]
-    embed = await print_tracking_stages(tracking,reaction,verify,roster,response_message)
+    embed = await print_tracking_stages(timestamp, tracking,reaction,verify,roster,response_message)
     await response.edit(embed)
 
     for emoji_id in EMOJI_IDS :
         current_progress+= 1
         emoji = emoji_dict.get(str(emoji_id))
-        await mod_plugin.bot.rest.add_reaction(channel=ctx.channel_id, message=ctx.options.message_id, emoji=emoji["emoji"])
+        await mod_plugin.bot.rest.add_reaction(channel=ctx.channel_id, message=message_id, emoji=emoji["emoji"])
         reaction_progress = (current_progress * PROGRESS_BAR_LENGTH) / (len(emoji_dict.values())+3)
         reaction = [red_x_emoji["emoji"],build_progress_bar(int(reaction_progress),PROGRESS_BAR_LENGTH)]
-        embed = await print_tracking_stages(tracking,reaction,verify,roster,response_message)
+        embed = await print_tracking_stages(timestamp, tracking,reaction,verify,roster,response_message)
         await response.edit(embed)
 
-async def build_tracking_info(ctx, response_message, response):
+async def build_tracking_info(ctx, message_id, event_id, response_message, response):
     event_time = (datetime.now() + timedelta(days=ctx.options.timeout)).replace(tzinfo=pytz.UTC)
     
     channel = await mod_plugin.bot.rest.fetch_channel(channel=ctx.channel_id)
-    message = await mod_plugin.bot.rest.fetch_message(channel=ctx.channel_id, message=ctx.options.message_id)
+    message = await mod_plugin.bot.rest.fetch_message(channel=ctx.channel_id, message=message_id)
     event = None
     timeout = event_time
     if ctx.options.event_id :
-        event = await mod_plugin.bot.rest.fetch_scheduled_event(ctx.guild_id,ctx.options.event_id)
+        event = await mod_plugin.bot.rest.fetch_scheduled_event(ctx.guild_id,event_id)
         event_time = event.start_time.replace(tzinfo=pytz.UTC) - SERVER_TIME_OFFSET
     
     roster_cache = {}
@@ -272,7 +282,7 @@ async def validate_authorized_user(ctx) -> bool:
     
     return True
 
-async def update_roster(tracking_event: ForumEvent, response, embed, tracking, reaction, verify, roster, response_message) -> None:
+async def update_roster(timestamp, tracking_event: ForumEvent, response, embed, tracking, reaction, verify, roster, response_message) -> None:
     roster_progress = 0
     current_progress = 0
     
@@ -285,7 +295,7 @@ async def update_roster(tracking_event: ForumEvent, response, embed, tracking, r
         tracking_event.roster_cache.update({str(emoji["id"]): user_mentions})
         roster_progress = (current_progress * PROGRESS_BAR_LENGTH) / len(emoji_dict.values())
         roster = [red_x_emoji["emoji"],build_progress_bar(int(roster_progress),PROGRESS_BAR_LENGTH)]
-        embed = await print_tracking_stages(tracking,reaction,verify,roster,response_message)
+        embed = await print_tracking_stages(timestamp, tracking,reaction,verify,roster,response_message)
         await response.edit(embed)
 
 @mod_plugin.command
@@ -325,9 +335,17 @@ async def track_post(ctx: lightbulb.Context) -> None:
     if authorized == False:
         return
     
-    response_message = f"Tracking https://discord.com/channels/{ctx.guild_id}/{ctx.channel_id}/{ctx.options.message_id}"
+    message_id : str = ctx.options.message_id
+    if "https://discord.com/" in message_id :
+        message_id = message_id.split("/")[-1]
+        
+    event_id : str = ctx.options.event_id
+    if "https://discord.com/" in event_id :
+        event_id = event_id.split("/")[-1]
+    
+    response_message = f"Tracking https://discord.com/channels/{ctx.guild_id}/{ctx.channel_id}/{message_id}"
     if ctx.options.event_id :
-        response_message = f"{response_message} for https://discord.com/events/{ctx.guild_id}/{ctx.options.event_id}"
+        response_message = f"{response_message} for https://discord.com/events/{ctx.guild_id}/{event_id}"
     
     if not red_x_emoji:
         emojis = await mod_plugin.bot.rest.fetch_guild_emojis(guild=GUILD_ID)
@@ -336,31 +354,38 @@ async def track_post(ctx: lightbulb.Context) -> None:
                 red_x_emoji = DefaultEmoji(name=emoji.name, id=emoji.id, emoji=emoji)
                 break;
     
+    discord_timestamp = generate_discord_timestamp(datetime.now())
     tracking = [red_x_emoji["emoji"],build_progress_bar(0,PROGRESS_BAR_LENGTH)]
     reaction = [red_x_emoji["emoji"],build_progress_bar(0,PROGRESS_BAR_LENGTH)]
     verify = [red_x_emoji["emoji"],build_progress_bar(0,PROGRESS_BAR_LENGTH)]
     roster = [red_x_emoji["emoji"],build_progress_bar(0,PROGRESS_BAR_LENGTH)]
-    embed = await print_tracking_stages(tracking,reaction,verify,roster,response_message)
+    embed = await print_tracking_stages(discord_timestamp,tracking,reaction,verify,roster,response_message)
     response = await ctx.respond(embed,flags=hikari.MessageFlag.EPHEMERAL)
     
-    tracking_event = await build_tracking_info(ctx, response_message, response)
+    discord_timestamp = generate_discord_timestamp(datetime.now())
+    tracking_event = await build_tracking_info(ctx, message_id, event_id, response_message, response)
     tracking = ["✅",build_progress_bar(PROGRESS_BAR_LENGTH,PROGRESS_BAR_LENGTH)]
-    embed = await print_tracking_stages(tracking,reaction,verify,roster,response_message)
+    embed = await print_tracking_stages(discord_timestamp, tracking,reaction,verify,roster,response_message)
     await response.edit(embed)
     
-    await add_reactions_to_post(ctx, response_message, response, embed, tracking,reaction,verify,roster)
+    discord_timestamp = generate_discord_timestamp(datetime.now())
+    await add_reactions_to_post(ctx, discord_timestamp, message_id, response_message, response, embed, tracking,reaction,verify,roster)
     reaction = ["✅",build_progress_bar(PROGRESS_BAR_LENGTH,PROGRESS_BAR_LENGTH)]
-    embed = await print_tracking_stages(tracking,reaction,verify,roster,response_message)
+    embed = await print_tracking_stages(discord_timestamp, tracking,reaction,verify,roster,response_message)
     await response.edit(embed)
     
-    await updateInterestedUsers(channel_id=ctx.channel_id, message_id=ctx.options.message_id)
+    discord_timestamp = generate_discord_timestamp(datetime.now())
+    await updateInterestedUsers(channel_id=ctx.channel_id, message_id=message_id)
     verify = ["✅",build_progress_bar(PROGRESS_BAR_LENGTH,PROGRESS_BAR_LENGTH)]
-    embed = await print_tracking_stages(tracking,reaction,verify,roster,response_message)
+    embed = await print_tracking_stages(discord_timestamp, tracking,reaction,verify,roster,response_message)
     await response.edit(embed)
     
-    await update_roster(tracking_event, response, embed, tracking,reaction,verify,roster,response_message)
+    discord_timestamp = generate_discord_timestamp(datetime.now())
+    await update_roster(discord_timestamp, tracking_event, response, embed, tracking,reaction,verify,roster,response_message)
     roster = ["✅",build_progress_bar(PROGRESS_BAR_LENGTH,PROGRESS_BAR_LENGTH)]
-    embed = await print_tracking_stages(tracking,reaction,verify,roster,response_message)
+    
+    discord_timestamp = generate_discord_timestamp(datetime.now())
+    embed = await print_tracking_stages(discord_timestamp, tracking,reaction,verify,roster,response_message)
     await response.edit(embed)
 
 @mod_plugin.command
