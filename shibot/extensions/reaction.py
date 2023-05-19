@@ -1,9 +1,11 @@
 # TODO: Add /Main Command for individual users
 # TODO: Add /Special Roles command
 # TODO: Order Users by Signup Order
+# TODO: Update /Help to reflect commands and implementation
 # FEATURE REQUEST: Sample Roster
 # FEATURE REQUEST: DM Sign ups before event
-# FEATURE REQUEST: 
+# FEATURE REQUEST: Low Priority (Not Filler)
+# FEATURE REQUEST: Setup Database handling
 
 import lightbulb
 import hikari
@@ -76,6 +78,12 @@ async def update_roster() -> None:
                 continue
             user_mentions = await fetch_emoji_info(forum_event, emoji)
             forum_event.roster_cache.update({str(emoji["id"]): user_mentions})
+
+async def updateInterestedUsers(channel_id: str, message_id: str):
+    timestamp = generate_discord_timestamp(datetime.now())
+    iterator = await mod_plugin.bot.rest.fetch_reactions_for_emoji(channel=channel_id, message=message_id, emoji=emoji_dict.get("🔔")["emoji"])
+    users = [user for user in iterator if user.id != BOT_USER_ID]
+    interested_users.update({channel_id: users})
 
 @mod_plugin.listener(hikari.ReactionEvent)
 async def print_reaction(event: hikari.ReactionEvent) -> None:
