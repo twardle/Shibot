@@ -97,29 +97,35 @@ async def print_reaction(event: hikari.ReactionEvent) -> None:
         return;
     
     if isinstance(event, hikari.ReactionAddEvent):
-        messages = await mod_plugin.bot.rest.fetch_messages(event.channel_id)
-        for message in messages:
-            if not message.content :
-                continue;
-            if "✅" in message.content and f"{event.user_id}" in message.content :
-                await mod_plugin.bot.rest.delete_message(message=message.id, channel=event.channel_id)
-            if red_x_emoji_link in message.content and f"{event.user_id}" in message.content :
-                await mod_plugin.bot.rest.delete_message(message=message.id, channel=event.channel_id)
-        
-        interested_users.get(event.channel_id).append(event.user_id)
-        await mod_plugin.bot.rest.create_message(event.channel_id, f" ✅ | <@{event.user_id}> | Interested in attending.")
+        await handle_reaction_add_event(event, red_x_emoji_link)
     elif isinstance(event,hikari.ReactionDeleteEvent):
-        messages = await mod_plugin.bot.rest.fetch_messages(event.channel_id)
-        for message in messages:
-            if not message.content :
-                continue;
-            if red_x_emoji_link in message.content and f"{event.user_id}" in message.content :
-                await mod_plugin.bot.rest.delete_message(message=message.id, channel=event.channel_id)
-        await mod_plugin.bot.rest.create_message(event.channel_id, f" {red_x_emoji_link} | <@{event.user_id}> | No longer interested in attending the event.")
+        await handle_reaction_delete_event(event, red_x_emoji_link)
     else: 
         print(f"Unhandled Event Type: {event}")
     
     return
+
+async def handle_reaction_delete_event(event, red_x_emoji_link):
+    messages = await mod_plugin.bot.rest.fetch_messages(event.channel_id)
+    for message in messages:
+        if not message.content :
+            continue;
+        if red_x_emoji_link in message.content and f"{event.user_id}" in message.content :
+            await mod_plugin.bot.rest.delete_message(message=message.id, channel=event.channel_id)
+    await mod_plugin.bot.rest.create_message(event.channel_id, f" {red_x_emoji_link} | <@{event.user_id}> | No longer interested in attending the event.")
+
+async def handle_reaction_add_event(event, red_x_emoji_link):
+    messages = await mod_plugin.bot.rest.fetch_messages(event.channel_id)
+    for message in messages:
+        if not message.content :
+            continue;
+        if "✅" in message.content and f"{event.user_id}" in message.content :
+            await mod_plugin.bot.rest.delete_message(message=message.id, channel=event.channel_id)
+        if red_x_emoji_link in message.content and f"{event.user_id}" in message.content :
+            await mod_plugin.bot.rest.delete_message(message=message.id, channel=event.channel_id)
+        
+    interested_users.get(event.channel_id).append(event.user_id)
+    await mod_plugin.bot.rest.create_message(event.channel_id, f" ✅ | <@{event.user_id}> | Interested in attending.")
 
 async def updateInterestedUsers(channel_id: str, message_id: str):
     iterator = await mod_plugin.bot.rest.fetch_reactions_for_emoji(channel=channel_id, message=message_id, emoji=emoji_dict.get("🔔")["emoji"])
@@ -132,18 +138,27 @@ async def add_reaction(channel_id: str, message_id: str, emoji_name, emoji_id, e
     emoji_dict.update({emoji_id: saved_emoji})
 
 async def print_tracking_stages(tracking_stage: str, emoji_stage: str, interested_user_stage: str, roster_cache_stage: str, message: str) -> hikari.Embed:
+    divider = "`                                        `"
     embed = hikari.Embed(title="Registering Event For Tracking...",color="#949fe6")
-    embed.add_field(f"{tracking_stage} | Building Tracking Info...", "`                                        `")
-    embed.add_field(f"{emoji_stage} | Adding Emojis to Message...", "`                                        `")
-    embed.add_field(f"{interested_user_stage} | Verifying Already Interested Users...", "`                                        `")
-    embed.add_field(f"{roster_cache_stage} | Building Roster Cache...", "`                                        `")
+    embed.add_field(f"{tracking_stage} | Building Tracking Info...", divider)
+    embed.add_field(f"{emoji_stage} | Adding Emojis to Message...", divider)
+    embed.add_field(f"{interested_user_stage} | Verifying Already Interested Users...", divider)
+    embed.add_field(f"{roster_cache_stage} | Building Roster Cache...", divider)
     discord_timestamp = generate_discord_timestamp(datetime.now())
     if roster_cache_stage != "✅":
         emoji_link = red_x_emoji["emoji"]
         embed.add_field(f"{emoji_link} | Working on Registering Event for Tracking.", message)
     else: 
         embed.add_field("✅ | Finished Registering Event for Tracking.", message)
-    embed.add_field("`                                        `", f"Last update processed <t:{discord_timestamp}:R>")
+    embed.add_field(divider, f"Last update processed <t:{discord_timestamp}:R>")
+    
+    progress_bar = build_progress_bar(tracking_stage, emoji_stage, interested_user_stage, roster_cache_stage)
+
+    embed.set_footer(progress_bar)
+
+    return embed
+
+def build_progress_bar(tracking_stage, emoji_stage, interested_user_stage, roster_cache_stage):
     progress_state = 0 + (4 if tracking_stage == "✅" else 0)
     progress_state += 9 if emoji_stage == "✅" else 0
     progress_state += 3 if interested_user_stage == "✅" else 0
@@ -155,10 +170,7 @@ async def print_tracking_stages(tracking_stage: str, emoji_stage: str, intereste
 
     for _ in range(31 - progress_state):
         progress_bar = f"{progress_bar}░"
-
-    embed.set_footer(progress_bar)
-
-    return embed
+    return progress_bar
 
 def generate_discord_timestamp(date_time: datetime):
     return calendar.timegm(date_time.utcnow().utctimetuple())
