@@ -77,6 +77,7 @@ async def update_roster() -> None:
 
 @mod_plugin.listener(hikari.ReactionEvent)
 async def print_reaction(event: hikari.ReactionEvent) -> None:
+    red_x_emoji_link = str(red_x_emoji["emoji"])
     if not isinstance(event, hikari.ReactionAddEvent) and not isinstance(event, hikari.ReactionDeleteEvent) :
         return
     
@@ -102,8 +103,9 @@ async def print_reaction(event: hikari.ReactionEvent) -> None:
                 continue;
             if "✅" in message.content and f"{event.user_id}" in message.content :
                 await mod_plugin.bot.rest.delete_message(message=message.id, channel=event.channel_id)
-            if red_x_emoji["emoji"] in message.content and f"{event.user_id}" in message.content :
+            if red_x_emoji_link in message.content and f"{event.user_id}" in message.content :
                 await mod_plugin.bot.rest.delete_message(message=message.id, channel=event.channel_id)
+        
         interested_users.get(event.channel_id).append(event.user_id)
         await mod_plugin.bot.rest.create_message(event.channel_id, f" ✅ | <@{event.user_id}> | Interested in attending.")
     elif isinstance(event,hikari.ReactionDeleteEvent):
@@ -111,9 +113,9 @@ async def print_reaction(event: hikari.ReactionEvent) -> None:
         for message in messages:
             if not message.content :
                 continue;
-            if red_x_emoji["emoji"] in message.content and f"{event.user_id}" in message.content :
+            if red_x_emoji_link in message.content and f"{event.user_id}" in message.content :
                 await mod_plugin.bot.rest.delete_message(message=message.id, channel=event.channel_id)
-        await mod_plugin.bot.rest.create_message(event.channel_id, f" ❎ | <@{event.user_id}> | No longer interested in attending the event.")
+        await mod_plugin.bot.rest.create_message(event.channel_id, f" {red_x_emoji_link} | <@{event.user_id}> | No longer interested in attending the event.")
     else: 
         print(f"Unhandled Event Type: {event}")
     
