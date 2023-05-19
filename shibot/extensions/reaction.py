@@ -381,7 +381,7 @@ async def track_post(ctx: lightbulb.Context) -> None:
         message_id = message_id.split("/")[-1]
         
     event_id : str = ctx.options.event_id
-    if "https://discord.com/" in event_id :
+    if event_id and "https://discord.com/" in event_id :
         event_id = event_id.split("/")[-1]
     
     response_message = f"Tracking https://discord.com/channels/{ctx.guild_id}/{ctx.channel_id}/{message_id}"
