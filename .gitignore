@@ -1,2 +1,3 @@
 /.venv
 /secrets
+/shibot/__pycache__
