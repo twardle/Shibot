@@ -1,5 +1,4 @@
 # TODO: Add /Main Command for individual users
-# TODO: Add Redundancies to prevent people tracking others events
 # TODO: Add /Special Roles command
 # TODO: Order Users by Signup Order
 # FEATURE REQUEST: Sample Roster
@@ -9,7 +8,7 @@
 import lightbulb
 import hikari
 import pytz
-from typing import TypedDict, Dict
+from typing import TypedDict, Dict, List
 from pytz import timezone
 import calendar
 from datetime import datetime, timedelta
@@ -23,14 +22,15 @@ class DefaultEmoji(TypedDict):
     emoji: hikari.Emoji
 
 class ForumEvent:
-    def __init__(self, channel: hikari.GuildChannel, message: hikari.Message, event: hikari.GuildEvent, custom: bool, roster_cache: Dict[str,str], event_timeout: datetime, tracking_timeout: datetime):
+    def __init__(self, channel: hikari.GuildChannel, message: hikari.Message, event: hikari.GuildEvent, custom: bool, roster_cache: Dict[str,str], verified_users: List[str], event_timeout: datetime, tracking_timeout: datetime):
         self.channel = channel
         self.message = message
         self.event = event
         self.custom = custom
+        self.roster_cache = roster_cache
+        self.authorized_users = verified_users
         self.event_timeout = event_timeout
         self.tracking_timeout = tracking_timeout
-        self.roster_cache = roster_cache
     
 SERVER_TIME_OFFSET = timedelta(hours=4)
 EMOJI_IDS = [
@@ -44,7 +44,7 @@ EMOJI_IDS = [
 RED_X_EMOJI_ID = "1108922427221745724"
 red_x_emoji : DefaultEmoji = None
 
-tracked_channel_ids = {}
+tracked_channel_ids: Dict[str, ForumEvent] = {}
 emoji_dict = {}
 interested_users = {}
 mod_plugin = lightbulb.Plugin("Reaction")
@@ -175,66 +175,6 @@ def build_progress_bar(tracking_stage, emoji_stage, interested_user_stage, roste
 def generate_discord_timestamp(date_time: datetime):
     return calendar.timegm(date_time.utcnow().utctimetuple())
 
-@mod_plugin.command
-@lightbulb.option(
-    "custom",
-    "Enables custom reactions",
-    type=bool,
-    required=False,
-    default=False
-)
-@lightbulb.option(
-    "event_id",
-    "Associates this post with an event.",
-    type=str,
-    required=False,
-)
-@lightbulb.option(
-    "message_id",
-    "Associates this post with a specific message.",
-    type=str,
-    required=True,
-)
-@lightbulb.option(
-    "timeout",
-    "number of day(s) before a channel is removed from the tracked list",
-    type=int,
-    required=False,
-    default=7
-)
-@lightbulb.command("track", "Begin tracking the associated post")
-@lightbulb.implements(lightbulb.SlashCommand)
-async def track_post(ctx: lightbulb.Context) -> None:  
-    global red_x_emoji
-    
-    response_message = f"Tracking https://discord.com/channels/{ctx.guild_id}/{ctx.channel_id}/{ctx.options.message_id}"
-    if ctx.options.event_id :
-        response_message = f"{response_message} for https://discord.com/events/{ctx.guild_id}/{ctx.options.event_id}"
-    
-    if not red_x_emoji:
-        emojis = await mod_plugin.bot.rest.fetch_guild_emojis(guild=GUILD_ID)
-        for emoji in emojis :
-            if str(emoji.id) == RED_X_EMOJI_ID :
-                red_x_emoji = DefaultEmoji(name=emoji.name, id=emoji.id, emoji=emoji)
-                break;
-                
-    embed = await print_tracking_stages(red_x_emoji["emoji"],red_x_emoji["emoji"],red_x_emoji["emoji"],red_x_emoji["emoji"], response_message)
-    response = await ctx.respond(embed,flags=hikari.MessageFlag.EPHEMERAL)
-    
-    event = await build_tracking_info(ctx, response_message, response)
-    
-    await add_reactions_to_post(ctx, response_message, response)
-    
-    await updateInterestedUsers(channel_id=ctx.channel_id, message_id=ctx.options.message_id)
-    
-    embed = await print_tracking_stages("✅","✅","✅",red_x_emoji["emoji"], response_message)
-    await response.edit(embed)
-    
-    await update_roster()
-    
-    embed = await print_tracking_stages("✅","✅","✅","✅", response_message)
-    await response.edit(embed)
-
 async def add_reactions_to_post(ctx, response_message, response):
     
     if not ctx.options.custom :
@@ -267,7 +207,8 @@ async def build_tracking_info(ctx, response_message, response):
         event_time = event.start_time.replace(tzinfo=pytz.UTC) - SERVER_TIME_OFFSET
     
     roster_cache = {}
-    tracking_event = ForumEvent(channel, message, event, ctx.options.custom, roster_cache, event_time, timeout)
+    verified_users = []
+    tracking_event = ForumEvent(channel, message, event, ctx.options.custom, roster_cache, verified_users, event_time, timeout)
     
     tracked_channel_ids.update({ctx.channel_id: tracking_event})
     
@@ -301,6 +242,88 @@ async def createEmbedForReaction(ctx: lightbulb.Context, forum_event: ForumEvent
         embed.add_field(f"{emoji_link} | {reaction_name}", user_mentions)
     embed.set_footer("Message Mods/Admins if you need more help")
     return embed
+
+async def validate_authorized_user(ctx) -> bool:
+    messages = await mod_plugin.bot.rest.fetch_messages(channel=ctx.channel_id)
+    messages[-1].author.id
+    authorized_users = tracked_channel_ids.get(ctx.channel_id).authorized_users if tracked_channel_ids.get(ctx.channel_id) else []
+    if not authorized_users :
+        authorized_users.append(messages[-1].author.id)
+    
+    #TODO: Add override for mods
+    if ctx.author.id not in authorized_users:
+        embed = hikari.Embed(title="UNAUTHORIZED USER",color="#880808")
+        embed.set_footer("Unable to execute command")
+        await ctx.respond(embed,flags=hikari.MessageFlag.EPHEMERAL)
+        print(f"Unauthorized Command Attempt | {ctx.author} | {ctx.get_channel().name} | Attempted to execute /{ctx.command.name}")
+        return False
+    
+    return True
+
+@mod_plugin.command
+@lightbulb.option(
+    "custom",
+    "Enables custom reactions",
+    type=bool,
+    required=False,
+    default=False
+)
+@lightbulb.option(
+    "event_id",
+    "Associates this post with an event.",
+    type=str,
+    required=False,
+)
+@lightbulb.option(
+    "message_id",
+    "Associates this post with a specific message.",
+    type=str,
+    required=True,
+)
+@lightbulb.option(
+    "timeout",
+    "number of day(s) before a channel is removed from the tracked list",
+    type=int,
+    required=False,
+    default=7
+)
+@lightbulb.command("track", "Begin tracking the associated post")
+@lightbulb.implements(lightbulb.SlashCommand)
+async def track_post(ctx: lightbulb.Context) -> None:  
+    global red_x_emoji
+    
+    authorized = await validate_authorized_user(ctx)
+    
+    if authorized == False:
+        return
+    
+    response_message = f"Tracking https://discord.com/channels/{ctx.guild_id}/{ctx.channel_id}/{ctx.options.message_id}"
+    if ctx.options.event_id :
+        response_message = f"{response_message} for https://discord.com/events/{ctx.guild_id}/{ctx.options.event_id}"
+    
+    if not red_x_emoji:
+        emojis = await mod_plugin.bot.rest.fetch_guild_emojis(guild=GUILD_ID)
+        for emoji in emojis :
+            if str(emoji.id) == RED_X_EMOJI_ID :
+                red_x_emoji = DefaultEmoji(name=emoji.name, id=emoji.id, emoji=emoji)
+                break;
+                
+    embed = await print_tracking_stages(red_x_emoji["emoji"],red_x_emoji["emoji"],red_x_emoji["emoji"],red_x_emoji["emoji"], response_message)
+    response = await ctx.respond(embed,flags=hikari.MessageFlag.EPHEMERAL)
+    
+    event = await build_tracking_info(ctx, response_message, response)
+    
+    await add_reactions_to_post(ctx, response_message, response)
+    
+    await updateInterestedUsers(channel_id=ctx.channel_id, message_id=ctx.options.message_id)
+    
+    embed = await print_tracking_stages("✅","✅","✅",red_x_emoji["emoji"], response_message)
+    await response.edit(embed)
+    
+    await update_roster()
+    
+    embed = await print_tracking_stages("✅","✅","✅","✅", response_message)
+    await response.edit(embed)
 
 @mod_plugin.command
 @lightbulb.command("roster", "Displays everyone's playable roles based on their reactions to the post above.")
