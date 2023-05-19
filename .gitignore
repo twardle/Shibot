@@ -1,3 +1,5 @@
 /.venv
 /secrets
 *.pyc
+shibot/extensions/__pycache__/
+shibot/__pycache__/
