@@ -80,4 +80,5 @@ async def rgb_command(ctx: lightbulb.Context) -> None:
     await handle_responses(ctx.bot, ctx.author, message, COLORS, footer)
     
 def load(bot: lightbulb.BotApp) -> None:
-    bot.add_plugin(mod_plugin)
+    # bot.add_plugin(mod_plugin)
+    return

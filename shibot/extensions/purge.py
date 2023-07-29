@@ -63,4 +63,5 @@ async def on_purge_error(event: lightbulb.CommandErrorEvent) -> bool:
     return False
 
 def load(bot: lightbulb.BotApp) -> None:
-    bot.add_plugin(mod_plugin)
+    # bot.add_plugin(mod_plugin)
+    return

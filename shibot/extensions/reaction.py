@@ -1,5 +1,5 @@
-# TODO: Add /Main Command for individual users
 # TODO: Add /Special Roles command
+# TODO: Add /Authorize command
 # TODO: Order Users by Signup Order
 # TODO: Update /Help to reflect commands and implementation
 # FEATURE REQUEST: Sample Roster
@@ -10,7 +10,7 @@
 import lightbulb
 import hikari
 import pytz
-from typing import TypedDict, Dict, List
+from typing import TypedDict, Dict, List, Iterable
 from pytz import timezone
 import calendar
 import asyncio
@@ -18,6 +18,7 @@ from datetime import datetime, timedelta
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from shibot import GUILD_ID, BOT_USER_ID
+from hikari.api.special_endpoints import MessageActionRowBuilder
 
 class DefaultEmoji(TypedDict):
     name: str
@@ -25,7 +26,7 @@ class DefaultEmoji(TypedDict):
     emoji: hikari.Emoji
 
 class ForumEvent:
-    def __init__(self, channel: hikari.GuildChannel, message: hikari.Message, event: hikari.GuildEvent, custom: bool, roster_cache: Dict[str,str], verified_users: List[str], event_timeout: datetime, tracking_timeout: datetime):
+    def __init__(self, channel: hikari.GuildChannel, message: hikari.Message, event: hikari.GuildEvent, custom: bool, roster_cache: Dict[str,str], verified_users: List[str], event_timeout: datetime, tracking_timeout: datetime, mains: Dict[str,DefaultEmoji]):
         self.channel = channel
         self.message = message
         self.event = event
@@ -34,6 +35,7 @@ class ForumEvent:
         self.authorized_users = verified_users
         self.event_timeout = event_timeout
         self.tracking_timeout = tracking_timeout
+        self.mains = mains
     
 SERVER_TIME_OFFSET = timedelta(hours=4)
 EMOJI_IDS = [
@@ -72,18 +74,14 @@ async def check_old_events() -> None:
 async def update_roster() -> None:
     
     for forum_event in tracked_channel_ids.values():
-        await updateInterestedUsers(channel_id=forum_event.channel.id, message_id=forum_event.message.id)
+        iterator = await mod_plugin.bot.rest.fetch_reactions_for_emoji(channel=forum_event.channel.id, message=forum_event.message.id, emoji=emoji_dict.get("🔔")["emoji"])
+        users = [user for user in iterator if user.id != BOT_USER_ID]
+        interested_users.update({forum_event.channel.id: users})
         for emoji in emoji_dict.values() :
             if emoji["emoji"] == "🔔":
                 continue
             user_mentions = await fetch_emoji_info(forum_event, emoji)
             forum_event.roster_cache.update({str(emoji["id"]): user_mentions})
-
-async def updateInterestedUsers(channel_id: str, message_id: str):
-    timestamp = generate_discord_timestamp(datetime.now())
-    iterator = await mod_plugin.bot.rest.fetch_reactions_for_emoji(channel=channel_id, message=message_id, emoji=emoji_dict.get("🔔")["emoji"])
-    users = [user for user in iterator if user.id != BOT_USER_ID]
-    interested_users.update({channel_id: users})
 
 @mod_plugin.listener(hikari.ReactionEvent)
 async def print_reaction(event: hikari.ReactionEvent) -> None:
@@ -200,7 +198,7 @@ def calc_total_progress(tracking_stage, reaction_stage, interested_stage, roster
         * PROGRESS_BAR_LENGTH
     )
 
-def build_progress_bar(progress_state, max_state):
+def build_progress_bar(progress_state: int, max_state):
     progress_bar = "" #31 long
     for _ in range(progress_state):
         progress_bar = f"{progress_bar}▓"
@@ -214,16 +212,16 @@ def generate_discord_timestamp(date_time: datetime):
 
 async def add_reactions_to_post(ctx, message_id, response_message, response, tracking,reaction,verify,roster):
     timestamp = generate_discord_timestamp(datetime.now())
-    
+
     if ctx.options.custom:
         reaction = ["✅",build_progress_bar(PROGRESS_BAR_LENGTH,PROGRESS_BAR_LENGTH)]
         embed = await print_tracking_stages(timestamp, tracking,reaction,verify,roster,response_message)
         await response.edit(embed)
         return
-    
+
     reaction_progress = 0
     current_progress = 0
-    
+
     await add_reaction(channel_id=ctx.channel_id, message_id=message_id, emoji_name="Interested", emoji_id="🔔", emoji="🔔")
     await add_reaction(channel_id=ctx.channel_id, message_id=message_id, emoji_name="New", emoji_id="🆕", emoji="🆕")
     await add_reaction(channel_id=ctx.channel_id, message_id=message_id, emoji_name="Filler", emoji_id="⭐", emoji="⭐")
@@ -234,9 +232,9 @@ async def add_reactions_to_post(ctx, message_id, response_message, response, tra
         if str(emoji.id) in EMOJI_IDS :
             saved_emoji = DefaultEmoji(name=emoji.name, id=emoji.id, emoji=emoji)
             emoji_dict.update({str(emoji.id): saved_emoji})
-    
-    reaction_progress = (current_progress * PROGRESS_BAR_LENGTH) / (len(emoji_dict.values())+3)
-    reaction = [red_x_emoji["emoji"],build_progress_bar(int(reaction_progress),PROGRESS_BAR_LENGTH)]
+
+    reaction_progress = int((current_progress * PROGRESS_BAR_LENGTH) / (len(emoji_dict.values())+3))
+    reaction = [red_x_emoji["emoji"],build_progress_bar(reaction_progress, PROGRESS_BAR_LENGTH)]
     embed = await print_tracking_stages(timestamp, tracking,reaction,verify,roster,response_message)
     await response.edit(embed)
 
@@ -248,11 +246,11 @@ async def add_reactions_to_post(ctx, message_id, response_message, response, tra
         reaction = [red_x_emoji["emoji"],build_progress_bar(int(reaction_progress),PROGRESS_BAR_LENGTH)]
         embed = await print_tracking_stages(timestamp, tracking,reaction,verify,roster,response_message)
         await response.edit(embed)
-    
+
     reaction = ["✅",build_progress_bar(PROGRESS_BAR_LENGTH,PROGRESS_BAR_LENGTH)]
     embed = await print_tracking_stages(timestamp, tracking,reaction,verify,roster,response_message)
     await response.edit(embed)
-    
+
     return reaction
 
 async def build_tracking_info(ctx, message_id, event_id, response_message, response, tracking, reaction, verify, roster):
@@ -269,7 +267,8 @@ async def build_tracking_info(ctx, message_id, event_id, response_message, respo
     
     roster_cache = {}
     verified_users = []
-    tracking_event = ForumEvent(channel, message, event, ctx.options.custom, roster_cache, verified_users, event_time, timeout)
+    mains = {}
+    tracking_event = ForumEvent(channel, message, event, ctx.options.custom, roster_cache, verified_users, event_time, timeout, mains)
     
     tracked_channel_ids.update({ctx.channel_id: tracking_event})
     
@@ -279,18 +278,25 @@ async def build_tracking_info(ctx, message_id, event_id, response_message, respo
     
     return tracking_event, tracking
 
-async def fetch_emoji_info(forum_event, emoji):
+async def fetch_emoji_info(forum_event: ForumEvent, emoji):
     emoji_link = emoji["emoji"]
     users = await mod_plugin.bot.rest.fetch_reactions_for_emoji(forum_event.channel.id, message=forum_event.message.id, emoji=emoji_link)
     user_mentions = ""
     for user in users :
         if user not in interested_users[forum_event.channel.id] :
-            continue;
+            continue
+        
+        is_main = False
+        if forum_event.mains:
+            is_main = forum_event.mains.get(str(user.id))["id"] == emoji["id"]
 
         if user_mentions == "" :
             user_mentions = user.mention
         else :
             user_mentions = f"{user_mentions}, {user.mention}"
+        
+        if is_main:
+            user_mentions = f"{user_mentions}*"
 
     return user_mentions if user_mentions != "" else "N/A"
 
@@ -307,6 +313,7 @@ async def createEmbedForReaction(ctx: lightbulb.Context, forum_event: ForumEvent
     return embed
 
 async def validate_authorized_user(ctx) -> bool:
+    now = datetime.now(pytz.timezone('America/New_York')).strftime("%m/%d/%Y %I:%M:%S %p")
     messages = await mod_plugin.bot.rest.fetch_messages(channel=ctx.channel_id)
     messages[-1].author.id
     authorized_users = tracked_channel_ids.get(ctx.channel_id).authorized_users if tracked_channel_ids.get(ctx.channel_id) else []
@@ -318,8 +325,10 @@ async def validate_authorized_user(ctx) -> bool:
         embed = hikari.Embed(title="UNAUTHORIZED USER",color="#880808")
         embed.set_footer("Unable to execute command")
         await ctx.respond(embed,flags=hikari.MessageFlag.EPHEMERAL)
-        print(f"Unauthorized Command Attempt | {ctx.author} | {ctx.get_channel().name} | Attempted to execute /{ctx.command.name}")
+        print(f"{now} | Unauthorized Command Attempt |  {ctx.author} | {ctx.get_channel().name} | Attempted to execute /{ctx.command.name}")
         return False
+    else :
+        print(f"{now} | Authorized Command Attempt | {ctx.author} | {ctx.get_channel().name} | Executed /{ctx.command.name}")
     
     return True
 
@@ -419,6 +428,9 @@ async def track_post(ctx: lightbulb.Context) -> None:
     verify = await updateInterestedUsers(ctx.channel_id, message_id, response, tracking,reaction,verify,roster, response_message)
     
     roster = await update_roster(tracking_event, response, tracking,reaction,verify,roster,response_message)
+    
+    now = datetime.now(pytz.timezone('America/New_York')).strftime("%m/%d/%Y %I:%M:%S %p")
+    print(f"{now} | Authorized Command Complete | {ctx.author} | {ctx.get_channel().name} | Executed /{ctx.command.name}")
 
 @mod_plugin.command
 @lightbulb.command("roster", "Displays everyone's playable roles based on their reactions to the post above.")
@@ -434,14 +446,115 @@ async def check_roster(ctx: lightbulb.Context) -> None:
     embed = await createEmbedForReaction(ctx, event)
     await response.edit(embed=embed)
 
+async def generate_rows(event: ForumEvent, user_id: str, bot: lightbulb.BotApp, dict) -> Iterable[MessageActionRowBuilder]:
+
+    rows: List[MessageActionRowBuilder] = []
+
+    row = bot.rest.build_message_action_row()
+
+    for i in range(len(dict)):
+        if i % 3 == 0 and i != 0:
+            rows.append(row)
+            row = bot.rest.build_message_action_row()
+
+        label = list(dict)[i]["emoji"]
+        disabled = True
+        if event.roster_cache.get(
+            str(list(dict)[i]["id"])
+        ) and str(user_id) in event.roster_cache.get(str(list(dict)[i]["id"])):
+            disabled = False
+
+        row.add_interactive_button(
+            hikari.ButtonStyle.SECONDARY,
+            list(dict)[i]["name"],
+            emoji=list(dict)[i]["emoji"],
+            label=list(dict)[i]["name"].upper().replace("_", " "),
+            is_disabled=disabled,
+        )
+
+    rows.append(row)
+
+    return rows
+
+async def update_specific_roster(ctx: lightbulb.UserContext, forum_event: ForumEvent) -> None:
+    red_x = red_x_emoji["emoji"]
+    timestamp = generate_discord_timestamp(datetime.now())
+    roster_progress = 0
+    current_progress = 0
+    
+    embed = hikari.Embed(title="Updating Roster State...",color="#949fe6")
+    progress = build_progress_bar(roster_progress,PROGRESS_BAR_LENGTH)
+    embed.add_field(f"{red_x} | Roster Loading...", progress)
+    response = await ctx.respond(embed,flags=hikari.MessageFlag.EPHEMERAL)
+    iterator = await mod_plugin.bot.rest.fetch_reactions_for_emoji(channel=forum_event.channel.id, message=forum_event.message.id, emoji=emoji_dict.get("🔔")["emoji"])
+    users = [user for user in iterator if user.id != BOT_USER_ID]
+    interested_users.update({forum_event.channel.id: users})
+    for emoji in emoji_dict.values() :
+        current_progress += 1
+        if emoji["emoji"] == "🔔":
+            continue
+        user_mentions = await fetch_emoji_info(forum_event, emoji)
+        forum_event.roster_cache.update({str(emoji["id"]): user_mentions})
+        roster_progress = (current_progress * PROGRESS_BAR_LENGTH) / len(emoji_dict.values())
+        progress = build_progress_bar(int(roster_progress),PROGRESS_BAR_LENGTH)
+        embed = hikari.Embed(title="Updating Roster State...",color="#949fe6")
+        embed.add_field(f"{red_x} | Roster Loading...", progress)
+        await response.edit(embed)
+    
+    progress = build_progress_bar(PROGRESS_BAR_LENGTH,PROGRESS_BAR_LENGTH)
+    embed = hikari.Embed(title="Updating Roster State...",color="#949fe6")
+    embed.add_field("✅ | Roster Loading...", progress)
+    await response.edit(embed)
+    
+    return response
+
+
+async def handle_responses(bot: lightbulb.BotApp,author: hikari.User,message: hikari.Message, list, forum_event: ForumEvent, footer, ) -> None:
+    with bot.stream(hikari.InteractionCreateEvent, 120).filter(
+        
+        lambda e: (isinstance(e.interaction, hikari.ComponentInteraction) and e.interaction.user == author and e.interaction.message == message)
+    ) as stream:
+        async for event in stream:
+            cid = event.interaction.custom_id
+            main = None
+            for emoji in emoji_dict.values() :
+                if cid == emoji["name"] :
+                    main = emoji
+            
+            if main :
+                main_name = main["name"].upper().replace("_", " ")
+                main_emoji = main["emoji"]
+                forum_event.mains.update({str(author.id): main}, )
+                embed = hikari.Embed(title=main_name,description=f"Main set to {main_emoji} {main_name}",)
+                if footer : embed.set_footer(footer)
+                try:
+                    await event.interaction.create_initial_response(hikari.ResponseType.MESSAGE_UPDATE,embed=embed)
+                except hikari.NotFoundError:
+                    await event.interaction.edit_initial_response(embed=embed,)
+
+    try:
+        await message.edit(components=[])
+    except hikari.NotFoundError:
+        return
+
 @mod_plugin.command
 @lightbulb.command("main", "Allows a user to set a main role based on their reactions. Disabled for Custom Events.")
 @lightbulb.implements(lightbulb.SlashCommand)
 async def set_main(ctx:lightbulb.Context) -> None:
     event = tracked_channel_ids.get(ctx.channel_id)
-    #TODO: Change to custom/default
-    if event[1].custom == True :
+    if not event or event.custom == True :
         return;
+    
+    response = await update_specific_roster(ctx, event)
+    valid_mains = [emoji for emoji in emoji_dict.values() if str(emoji["id"]) in EMOJI_IDS]
+    rows = await generate_rows(event, ctx.author.id, ctx.bot, valid_mains)
+    response = await ctx.respond(hikari.Embed(title="Pick a Main"),components=rows,flags=hikari.MessageFlag.EPHEMERAL)
+    message = await response.message()
+    footer = None
+    try:
+        await handle_responses(ctx.bot, ctx.author, message, valid_mains, event, footer)
+    except lightbulb.CommandInvocationError:
+        return
 
 def load(bot: lightbulb.BotApp) -> None:
     bot.add_plugin(mod_plugin)

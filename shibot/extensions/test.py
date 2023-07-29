@@ -17,4 +17,5 @@ async def test(ctx: lightbulb.Context) -> None:
     await ctx.respond("It worked!")
     
 def load(bot: lightbulb.BotApp) -> None:
-    bot.add_plugin(mod_plugin)
+    # bot.add_plugin(mod_plugin)
+    return
