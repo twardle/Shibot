@@ -247,6 +247,36 @@ async def print_tracking_stages(timestamp, tracking_stage, reaction_stage, inter
 
     return embed
 
+async def generate_buttons(event: ForumEvent, user_id: str, bot: lightbulb.BotApp, dict) -> Iterable[MessageActionRowBuilder]:
+
+    rows: List[MessageActionRowBuilder] = []
+
+    row = bot.rest.build_message_action_row()
+
+    for i in range(len(dict)):
+        if i % 3 == 0 and i != 0:
+            rows.append(row)
+            row = bot.rest.build_message_action_row()
+
+        label = list(dict)[i]["emoji"]
+        disabled = True
+        if event.roster_cache.get(
+            str(list(dict)[i]["id"])
+        ) and str(user_id) in event.roster_cache.get(str(list(dict)[i]["id"])):
+            disabled = False
+
+        row.add_interactive_button(
+            hikari.ButtonStyle.SECONDARY,
+            list(dict)[i]["name"],
+            emoji=list(dict)[i]["emoji"],
+            label=list(dict)[i]["name"].upper().replace("_", " "),
+            is_disabled=disabled,
+        )
+
+    rows.append(row)
+
+    return rows
+
 def generate_discord_timestamp(date_time: datetime):
     return calendar.timegm(date_time.utcnow().utctimetuple())
 
@@ -550,36 +580,6 @@ async def check_roster(ctx: lightbulb.Context) -> None:
     embed = await createEmbedForReaction(ctx, event)
     await response.edit(embed=embed)
 
-async def generate_rows(event: ForumEvent, user_id: str, bot: lightbulb.BotApp, dict) -> Iterable[MessageActionRowBuilder]:
-
-    rows: List[MessageActionRowBuilder] = []
-
-    row = bot.rest.build_message_action_row()
-
-    for i in range(len(dict)):
-        if i % 3 == 0 and i != 0:
-            rows.append(row)
-            row = bot.rest.build_message_action_row()
-
-        label = list(dict)[i]["emoji"]
-        disabled = True
-        if event.roster_cache.get(
-            str(list(dict)[i]["id"])
-        ) and str(user_id) in event.roster_cache.get(str(list(dict)[i]["id"])):
-            disabled = False
-
-        row.add_interactive_button(
-            hikari.ButtonStyle.SECONDARY,
-            list(dict)[i]["name"],
-            emoji=list(dict)[i]["emoji"],
-            label=list(dict)[i]["name"].upper().replace("_", " "),
-            is_disabled=disabled,
-        )
-
-    rows.append(row)
-
-    return rows
-
 @mod_plugin.command
 @lightbulb.command("main", "Allows a user to set a main role based on their reactions. Disabled for Custom Events.")
 @lightbulb.implements(lightbulb.SlashCommand)
@@ -590,7 +590,7 @@ async def set_main(ctx:lightbulb.Context) -> None:
     
     response = await update_specific_roster(ctx, event)
     valid_mains = [emoji for emoji in emoji_dict.values() if str(emoji["id"]) in EMOJI_IDS]
-    rows = await generate_rows(event, ctx.author.id, ctx.bot, valid_mains)
+    rows = await generate_buttons(event, ctx.author.id, ctx.bot, valid_mains)
     response = await ctx.respond(hikari.Embed(title="Pick a Main"),components=rows,flags=hikari.MessageFlag.EPHEMERAL)
     message = await response.message()
     footer = None
@@ -600,7 +600,7 @@ async def set_main(ctx:lightbulb.Context) -> None:
         return
 
 ##########################################
-##                LOADING               ##
+##               START UP               ##
 ##########################################
 
 def load(bot: lightbulb.BotApp) -> None:
