@@ -7,6 +7,9 @@
 # FEATURE REQUEST: Low Priority (Not Filler)
 # FEATURE REQUEST: Setup Database handling
 
+import json
+import jsonpickle as jsonpickle
+import simplejson
 import lightbulb
 import hikari
 import pytz
@@ -28,23 +31,31 @@ class DefaultEmoji(TypedDict):
     name: str
     id: int
     emoji: hikari.Emoji
+    
+class MainEmoji(TypedDict):
+    name: str
+    id: int
 
 class ForumEvent:
-    def __init__(self, channel: hikari.GuildChannel, message: hikari.Message, event: hikari.GuildEvent, custom: bool, roster_cache: Dict[str,str], verified_users: List[str], event_timeout: datetime, tracking_timeout: datetime, mains: Dict[str,DefaultEmoji]):
-        self.channel = channel
-        self.message = message
-        self.event = event
+    def __init__(self, channelid: str, messageid: str, custom: bool, roster_cache: Dict[str,str], verified_users: List[str], event_timeout: datetime, tracking_timeout: datetime, mains: Dict[str,MainEmoji]):
+        self.channelid = channelid
+        self.messageid = messageid
         self.custom = custom
         self.roster_cache = roster_cache
         self.authorized_users = verified_users
         self.event_timeout = event_timeout
         self.tracking_timeout = tracking_timeout
         self.mains = mains
+    
+    def toJSON(self):
+        return json.dumps(self, default=lambda o: o.__dict__, 
+            sort_keys=True, indent=4)
 
 ##########################################
 ##                CONSTS                ##
 ##########################################
 
+TRACKING_JSON_FILE = "tracking_backup.json"
 SERVER_TIME_OFFSET = timedelta(hours=4)
 EMOJI_IDS = [
     "1108505145697898647", # Quick Heal
@@ -62,10 +73,11 @@ PROGRESS_BAR_LENGTH = 25
 ##               VARIABLES              ##
 ##########################################
 
-tracked_channel_ids: Dict[str, ForumEvent] = {}
+tracked_channels: Dict[str, ForumEvent] = {}
 emoji_dict = {}
 interested_users = {}
 mod_plugin = lightbulb.Plugin("Reaction")
+reloaded = 0
 
 sched = AsyncIOScheduler()
 sched.start()
@@ -76,28 +88,38 @@ sched.start()
 
 @sched.scheduled_job(CronTrigger(minute="*/5"))
 async def check_old_events() -> None:
+    await on_startup()
+    
     to_remove = [
         event[0]
-        for event in tracked_channel_ids.items()
+        for event in tracked_channels.items()
         if event[1].event_timeout - timedelta(minutes=5) < datetime.now().replace(tzinfo=pytz.UTC)
     ]
     
     for key in to_remove:
-        tracked_channel_ids.pop(key)
+        tracked_channels.pop(key)
         await mod_plugin.bot.rest.create_message(key, f"<#{key}> | Event signup period has ended.")
 
 @sched.scheduled_job(CronTrigger(minute="*/5"))
 async def update_roster() -> None:
+    await on_startup()
     
-    for forum_event in tracked_channel_ids.values():
-        iterator = await mod_plugin.bot.rest.fetch_reactions_for_emoji(channel=forum_event.channel.id, message=forum_event.message.id, emoji=emoji_dict.get("🔔")["emoji"])
+    
+    for forum_event in tracked_channels.values():
+        iterator = await mod_plugin.bot.rest.fetch_reactions_for_emoji(channel=forum_event.channelid, message=forum_event.messageid, emoji=emoji_dict.get("🔔")["emoji"])
         users = [user for user in iterator if user.id != BOT_USER_ID]
-        interested_users.update({forum_event.channel.id: users})
+        interested_users.update({forum_event.channelid: users})
         for emoji in emoji_dict.values() :
             if emoji["emoji"] == "🔔":
                 continue
             user_mentions = await fetch_emoji_info(forum_event, emoji)
             forum_event.roster_cache.update({str(emoji["id"]): user_mentions})
+
+@sched.scheduled_job(CronTrigger(minute="*/5"))
+async def backup_tracked_files() -> None:
+    await on_startup()
+    
+    await build_json(TRACKING_JSON_FILE, tracked_channels)
 
 ##########################################
 ##            REACTION EVENTS           ##
@@ -116,10 +138,10 @@ async def print_reaction(event: hikari.ReactionEvent) -> None:
     if event.emoji_name != "🔔" :
         return
     
-    if event.channel_id not in tracked_channel_ids:
+    if event.channel_id not in tracked_channels:
         return;
     
-    tracked_event = tracked_channel_ids.get(event.channel_id)
+    tracked_event = tracked_channels.get(event.channel_id)
     
     if tracked_event and str(tracked_event.message.id) != str(event.message_id) :
         return;
@@ -296,7 +318,7 @@ async def createEmbedForReaction(ctx: lightbulb.Context, forum_event: ForumEvent
 ##             INFO FETCHING            ##
 ##########################################
 
-async def build_tracking_info(ctx, message_id, event_id, response_message, response, tracking, reaction, verify, roster):
+async def build_tracking_info(ctx, channel_id, message_id, event_id, response_message, response, tracking, reaction, verify, roster):
     timestamp = generate_discord_timestamp(datetime.now())
     event_time = (datetime.now() + timedelta(days=ctx.options.timeout)).replace(tzinfo=pytz.UTC)
     
@@ -311,9 +333,14 @@ async def build_tracking_info(ctx, message_id, event_id, response_message, respo
     roster_cache = {}
     verified_users = []
     mains = {}
-    tracking_event = ForumEvent(channel, message, event, ctx.options.custom, roster_cache, verified_users, event_time, timeout, mains)
     
-    tracked_channel_ids.update({ctx.channel_id: tracking_event})
+    referenced_channel: str = channel_id
+    
+    tracking_event = ForumEvent(f"{channel_id}", message_id, ctx.options.custom, roster_cache, verified_users, event_time, timeout, mains)
+    
+    print(f"{jsonpickle.encode(tracking_event)}")
+    
+    tracked_channels.update({f"{ctx.channel_id}": tracking_event})
     
     tracking = ["✅",build_progress_bar(PROGRESS_BAR_LENGTH,PROGRESS_BAR_LENGTH)]
     embed = await print_tracking_stages(timestamp, tracking,reaction,verify,roster,response_message)
@@ -323,10 +350,10 @@ async def build_tracking_info(ctx, message_id, event_id, response_message, respo
 
 async def fetch_emoji_info(forum_event: ForumEvent, emoji):
     emoji_link = emoji["emoji"]
-    users = await mod_plugin.bot.rest.fetch_reactions_for_emoji(forum_event.channel.id, message=forum_event.message.id, emoji=emoji_link)
+    users = await mod_plugin.bot.rest.fetch_reactions_for_emoji(forum_event.channelid, message=forum_event.messageid, emoji=emoji_link)
     user_mentions = ""
     for user in users :
-        if user not in interested_users[forum_event.channel.id] :
+        if user not in interested_users[forum_event.channelid] :
             continue
         
         is_main = False
@@ -347,12 +374,18 @@ async def fetch_emoji_info(forum_event: ForumEvent, emoji):
 ##              UPDATE DATA             ##
 ##########################################
 
-async def update_roster(tracking_event: ForumEvent, response, tracking, reaction, verify, roster, response_message) -> None:
+async def update_roster(buildCache, tracking_event: ForumEvent, response, tracking, reaction, verify, roster, response_message) -> None:
     timestamp = generate_discord_timestamp(datetime.now())
     roster_progress = 0
     current_progress = 0
     
-    # await updateInterestedUsers(channel_id=tracking_event.channel.id, message_id=tracking_event.message.id)
+    if not buildCache:
+        roster = ["✅",build_progress_bar(PROGRESS_BAR_LENGTH,PROGRESS_BAR_LENGTH)]
+        discord_timestamp = generate_discord_timestamp(datetime.now())
+        embed = await print_tracking_stages(discord_timestamp, tracking,reaction,verify,roster,response_message)
+        await response.edit(embed)
+        return roster
+    
     for emoji in emoji_dict.values() :
         current_progress+= 1
         if emoji["emoji"] == "🔔":
@@ -371,7 +404,7 @@ async def update_roster(tracking_event: ForumEvent, response, tracking, reaction
     
     return roster
 
-async def update_specific_roster(ctx: lightbulb.UserContext, forum_event: ForumEvent) -> None:
+async def update_specific_roster(ctx: lightbulb.UserContext, forum_event: ForumEvent) -> None:    
     red_x = red_x_emoji["emoji"]
     timestamp = generate_discord_timestamp(datetime.now())
     roster_progress = 0
@@ -381,9 +414,9 @@ async def update_specific_roster(ctx: lightbulb.UserContext, forum_event: ForumE
     progress = build_progress_bar(roster_progress,PROGRESS_BAR_LENGTH)
     embed.add_field(f"{red_x} | Roster Loading...", progress)
     response = await ctx.respond(embed,flags=hikari.MessageFlag.EPHEMERAL)
-    iterator = await mod_plugin.bot.rest.fetch_reactions_for_emoji(channel=forum_event.channel.id, message=forum_event.message.id, emoji=emoji_dict.get("🔔")["emoji"])
+    iterator = await mod_plugin.bot.rest.fetch_reactions_for_emoji(channel=forum_event.channelid, message=forum_event.messageid, emoji=emoji_dict.get("🔔")["emoji"])
     users = [user for user in iterator if user.id != BOT_USER_ID]
-    interested_users.update({forum_event.channel.id: users})
+    interested_users.update({forum_event.channelid: users})
     for emoji in emoji_dict.values() :
         current_progress += 1
         if emoji["emoji"] == "🔔":
@@ -410,14 +443,15 @@ async def handle_response_main(bot: lightbulb.BotApp,author: hikari.User,message
     ) as stream:
         async for event in stream:
             cid = event.interaction.custom_id
-            main = None
+            main: MainEmoji = None
+            main_emoji: DefaultEmoji = None
             for emoji in emoji_dict.values() :
                 if cid == emoji["name"] :
-                    main = emoji
+                    main =MainEmoji(name=emoji["name"],id=str(emoji["id"]))
+                    main_emoji = emoji["emoji"]
             
             if main :
                 main_name = main["name"].upper().replace("_", " ")
-                main_emoji = main["emoji"]
                 forum_event.mains.update({str(author.id): main}, )
                 embed = hikari.Embed(title=main_name,description=f"Main set to {main_emoji} {main_name}",)
                 if footer : embed.set_footer(footer)
@@ -470,7 +504,7 @@ async def validate_authorized_user(ctx) -> bool:
     now = datetime.now(pytz.timezone('America/New_York')).strftime("%m/%d/%Y %I:%M:%S %p")
     messages = await mod_plugin.bot.rest.fetch_messages(channel=ctx.channel_id)
     messages[-1].author.id
-    authorized_users = tracked_channel_ids.get(ctx.channel_id).authorized_users if tracked_channel_ids.get(ctx.channel_id) else []
+    authorized_users = tracked_channels.get(ctx.channel_id).authorized_users if tracked_channels.get(ctx.channel_id) else []
     if not authorized_users :
         authorized_users.append(messages[-1].author.id)
     
@@ -487,6 +521,23 @@ async def validate_authorized_user(ctx) -> bool:
     return True
 
 ##########################################
+##             BUILD OUTPUT             ##
+##########################################
+
+async def build_json(filename, structure: ForumEvent):
+    tracked_json = jsonpickle.encode(structure)
+    
+    with open(filename, "w") as outfile:
+        outfile.write(tracked_json)
+    
+    return
+
+def load_tracked(filename):
+    global tracked_channels
+    with open(filename, 'r') as infile:
+        tracked_channels = jsonpickle.decode(infile.read())
+
+##########################################
 ##               COMMANDS               ##
 ##########################################
 
@@ -494,6 +545,13 @@ async def validate_authorized_user(ctx) -> bool:
 @lightbulb.option(
     "custom",
     "Enables custom reactions",
+    type=bool,
+    required=False,
+    default=False
+)
+@lightbulb.option(
+    "build_cache",
+    "Instantly build roster cache",
     type=bool,
     required=False,
     default=False
@@ -519,8 +577,10 @@ async def validate_authorized_user(ctx) -> bool:
 )
 @lightbulb.command("track", "Begin tracking the associated post")
 @lightbulb.implements(lightbulb.SlashCommand)
-async def track_post(ctx: lightbulb.Context) -> None:  
+async def track_post(ctx: lightbulb.Context) -> None:
     global red_x_emoji
+    
+    await on_startup()
     loop = asyncio.get_running_loop()
     authorized = await validate_authorized_user(ctx)
     
@@ -539,13 +599,6 @@ async def track_post(ctx: lightbulb.Context) -> None:
     if ctx.options.event_id :
         response_message = f"{response_message} for https://discord.com/events/{ctx.guild_id}/{event_id}"
     
-    if not red_x_emoji:
-        emojis = await mod_plugin.bot.rest.fetch_guild_emojis(guild=GUILD_ID)
-        for emoji in emojis :
-            if str(emoji.id) == RED_X_EMOJI_ID :
-                red_x_emoji = DefaultEmoji(name=emoji.name, id=emoji.id, emoji=emoji)
-                break;
-    
     discord_timestamp = generate_discord_timestamp(datetime.now())
     tracking = [red_x_emoji["emoji"],build_progress_bar(0,PROGRESS_BAR_LENGTH)]
     reaction = [red_x_emoji["emoji"],build_progress_bar(0,PROGRESS_BAR_LENGTH)]
@@ -555,13 +608,13 @@ async def track_post(ctx: lightbulb.Context) -> None:
     response = await ctx.respond(embed,flags=hikari.MessageFlag.EPHEMERAL)
     
     discord_timestamp = generate_discord_timestamp(datetime.now())
-    tracking_event, tracking = await build_tracking_info(ctx, message_id, event_id, response_message,response,tracking,reaction,verify,roster)
+    tracking_event, tracking = await build_tracking_info(ctx, ctx.get_channel().id, message_id, event_id, response_message,response,tracking,reaction,verify,roster)
     
     reaction = await add_reactions_to_post(ctx, message_id, response_message, response, tracking,reaction,verify,roster)
     
     verify = await updateInterestedUsers(ctx.channel_id, message_id, response, tracking,reaction,verify,roster, response_message)
     
-    roster = await update_roster(tracking_event, response, tracking,reaction,verify,roster,response_message)
+    roster = await update_roster(ctx.options.build_cache, tracking_event, response, tracking,reaction,verify,roster,response_message)
     
     now = datetime.now(pytz.timezone('America/New_York')).strftime("%m/%d/%Y %I:%M:%S %p")
     print(f"{now} | Authorized Command Complete | {ctx.author} | {ctx.get_channel().name} | Executed /{ctx.command.name}")
@@ -570,7 +623,12 @@ async def track_post(ctx: lightbulb.Context) -> None:
 @lightbulb.command("roster", "Displays everyone's playable roles based on their reactions to the post above.")
 @lightbulb.implements(lightbulb.SlashCommand)
 async def check_roster(ctx: lightbulb.Context) -> None:
-    event = tracked_channel_ids.get(ctx.channel_id)
+    global tracked_channels
+    await on_startup()
+        
+    print(f"{tracked_channels}")
+    
+    event = tracked_channels.get(f"{ctx.channel_id}")
     
     if not event :
         await ctx.respond("Post is not currently being tracked.", flags=hikari.MessageFlag.EPHEMERAL)
@@ -584,8 +642,14 @@ async def check_roster(ctx: lightbulb.Context) -> None:
 @lightbulb.command("main", "Allows a user to set a main role based on their reactions. Disabled for Custom Events.")
 @lightbulb.implements(lightbulb.SlashCommand)
 async def set_main(ctx:lightbulb.Context) -> None:
-    event = tracked_channel_ids.get(ctx.channel_id)
+    await on_startup()
+        
+    event = tracked_channels.get(f"{ctx.channel_id}")
     if not event or event.custom == True :
+        print(f"Failed to load {ctx.channel_id}, not in tracked events.")
+        embed = hikari.Embed(title="INVALID CHANNEL",color="#880808")
+        embed.set_footer("This channel has not been added to tracked events.")
+        await ctx.respond(embed,flags=hikari.MessageFlag.EPHEMERAL)
         return;
     
     response = await update_specific_roster(ctx, event)
@@ -603,5 +667,45 @@ async def set_main(ctx:lightbulb.Context) -> None:
 ##               START UP               ##
 ##########################################
 
+async def on_startup() :
+    global reloaded, red_x_emoji, emoji_dict, tracked_channels
+    
+    if reloaded == 1:
+        return
+    
+    load_tracked(TRACKING_JSON_FILE)
+    
+    print(f"{tracked_channels}")
+    
+    emojis = await mod_plugin.bot.rest.fetch_guild_emojis(guild=GUILD_ID)
+    for emoji in emojis :
+        if str(emoji.id) == RED_X_EMOJI_ID :
+            red_x_emoji = DefaultEmoji(name=emoji.name, id=emoji.id, emoji=emoji)
+            break;
+    
+    
+    print(f"{red_x_emoji}")
+    
+    saved_emoji = DefaultEmoji(name="Interested", id="🔔", emoji="🔔")
+    emoji_dict.update({"🔔":saved_emoji})
+    saved_emoji = DefaultEmoji(name="New", id="🆕", emoji="🆕")
+    emoji_dict.update({"🆕":saved_emoji})
+    saved_emoji = DefaultEmoji(name="Filler", id="⭐", emoji="⭐")
+    emoji_dict.update({"⭐":saved_emoji})
+    
+    emojis = await mod_plugin.bot.rest.fetch_guild_emojis(guild=GUILD_ID)
+    for emoji in emojis :
+        if str(emoji.id) in EMOJI_IDS :
+            saved_emoji = DefaultEmoji(name=emoji.name, id=emoji.id, emoji=emoji)
+            emoji_dict.update({str(emoji.id): saved_emoji})
+            
+    print(f"{emoji_dict}")
+    
+    reloaded = 1
+    return
+    
 def load(bot: lightbulb.BotApp) -> None:
+    jsonpickle.set_encoder_options('simplejson', use_decimal=True, indent=4)
+    jsonpickle.set_decoder_options('simplejson', use_decimal=True)
+    jsonpickle.set_preferred_backend('simplejson')
     bot.add_plugin(mod_plugin)
