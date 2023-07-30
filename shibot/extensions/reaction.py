@@ -80,7 +80,6 @@ mod_plugin = lightbulb.Plugin("Reaction")
 reloaded = 0
 
 sched = AsyncIOScheduler()
-sched.start()
 
 ##########################################
 ##               CRON JOBS              ##
@@ -668,7 +667,7 @@ async def set_main(ctx:lightbulb.Context) -> None:
 ##########################################
 
 async def on_startup() :
-    global reloaded, red_x_emoji, emoji_dict, tracked_channels
+    global reloaded, red_x_emoji, emoji_dict, tracked_channels, sched
     
     if reloaded == 1:
         return
@@ -700,6 +699,8 @@ async def on_startup() :
             emoji_dict.update({str(emoji.id): saved_emoji})
             
     print(f"{emoji_dict}")
+    
+    sched.start()
     
     reloaded = 1
     return
