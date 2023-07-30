@@ -700,12 +700,14 @@ async def on_startup() :
             
     print(f"{emoji_dict}")
     
-    sched.start()
     
     reloaded = 1
     return
     
 def load(bot: lightbulb.BotApp) -> None:
+    global sched
+    
+    sched.start()
     jsonpickle.set_encoder_options('simplejson', use_decimal=True, indent=4)
     jsonpickle.set_decoder_options('simplejson', use_decimal=True)
     jsonpickle.set_preferred_backend('simplejson')
