@@ -662,6 +662,12 @@ async def set_main(ctx:lightbulb.Context) -> None:
     except lightbulb.CommandInvocationError:
         return
 
+@mod_plugin.command
+@lightbulb.command("load", "Initial Startup")
+@lightbulb.implements(lightbulb.SlashCommand)
+async def load(ctx:lightbulb.Context) -> None:
+    await on_startup()
+
 ##########################################
 ##               START UP               ##
 ##########################################
