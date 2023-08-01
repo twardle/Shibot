@@ -834,6 +834,21 @@ async def load(ctx:lightbulb.Context) -> None:
     await ctx.respond(embed,flags=hikari.MessageFlag.EPHEMERAL)
     log.info("*** | Finished Backup | ***")
 
+@mod_plugin.command
+@lightbulb.command("release_notes", "Release Notes (v1.0.0)")
+@lightbulb.implements(lightbulb.SlashCommand)
+async def load(ctx:lightbulb.Context) -> None:
+    log.info("*** | Start Release Notes | ***")
+    embed = hikari.Embed(title="Release Notes", color="#00ffff", url="https://github.com/twardle/DiscordBot_Hikari/blob/master")
+    embed.add_field("Safe Reboot","*Shibot will now remember things, even after unexpected naps!*")
+    embed.add_field("Performance Enhancements","*Shibot's zoomies are off the charts thanks to being a bit more lazy!*")
+    embed.add_field("Caching Cleanup","*Shibot now only remembers the important things...*")
+    embed.add_field("Logging Handling","*Shibot sometimes makes mistakes, and that's ok.*")
+    embed.set_thumbnail("https://github.com/twardle/DiscordBot_Hikari/blob/master/Shiba_logo.png?raw=true")
+    embed.set_footer("Shibot v1.0.0")
+    await ctx.respond(embed,flags=hikari.MessageFlag.EPHEMERAL)
+    log.info("*** | Finished Release Notes | ***")
+
 ##########################################
 ##               START UP               ##
 ##########################################
