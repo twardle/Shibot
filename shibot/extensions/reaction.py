@@ -842,7 +842,7 @@ async def load(ctx:lightbulb.Context) -> None:
     required=False,
     default=True
 )
-@lightbulb.command("release_notes", "Release Notes (v1.0.0)")
+@lightbulb.command("release_notes", "Release Notes (v0.3.1)")
 @lightbulb.implements(lightbulb.SlashCommand)
 async def load(ctx:lightbulb.Context) -> None:
     log.info("*** | Start Release Notes | ***")
@@ -852,7 +852,7 @@ async def load(ctx:lightbulb.Context) -> None:
     embed.add_field("Caching Cleanup","*Shibot now only remembers the important things...*")
     embed.add_field("Logging Handling","*Shibot sometimes makes mistakes, and that's ok.*")
     embed.set_thumbnail("https://github.com/twardle/DiscordBot_Hikari/blob/master/Shiba_logo.png?raw=true")
-    embed.set_footer("Shibot v1.0.0")
+    embed.set_footer("Shibot v0.3.1")
     
     if ctx.options.ephemeral :
         await ctx.respond(embed,flags=hikari.MessageFlag.EPHEMERAL)
