@@ -1,7 +1,6 @@
 # TODO: Add /Special Roles command
 # TODO: Add /Authorize command
 # TODO: Order Users by Signup Order
-# TODO: Update /Help to reflect commands and implementation
 # FEATURE REQUEST: Sample Roster
 # FEATURE REQUEST: DM Sign ups before event
 # FEATURE REQUEST: Low Priority (Not Filler)
@@ -17,7 +16,6 @@ import pytz, time
 from typing import TypedDict, Dict, List, Iterable
 from pytz import timezone
 import calendar
-import asyncio
 from datetime import datetime, timedelta
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -68,7 +66,6 @@ EMOJI_IDS = [
     "1108505148201902182", # Power DPS
     ]
 RED_X_EMOJI_ID = "1108922427221745724"
-red_x_emoji : DefaultEmoji = None
 PROGRESS_BAR_LENGTH = 25
 
 ##########################################
@@ -78,6 +75,7 @@ PROGRESS_BAR_LENGTH = 25
 tracked_channels: Dict[str, ForumEvent] = {}
 emoji_dict = {}
 interested_users = {}
+red_x_emoji : DefaultEmoji = None
 mod_plugin = lightbulb.Plugin("Reaction")
 reloaded = 0
 
@@ -223,6 +221,8 @@ async def add_reactions_to_post(ctx, message_id, response_message, response, tra
         reaction = ["✅",build_progress_bar(PROGRESS_BAR_LENGTH,PROGRESS_BAR_LENGTH)]
         embed = await print_tracking_stages(timestamp, tracking,reaction,verify,roster,response_message)
         await response.edit(embed)
+        
+        log.info(f"*** | Finish Adding Reactions To Post | Custom Post | Message: {message_id} | ***")
         return reaction
     
     iterator = await mod_plugin.bot.rest.fetch_reactions_for_emoji(channel=ctx.channel_id, message=message_id, emoji=emoji_dict.get("🔔")["emoji"])
@@ -232,7 +232,7 @@ async def add_reactions_to_post(ctx, message_id, response_message, response, tra
         reaction = ["✅",build_progress_bar(PROGRESS_BAR_LENGTH,PROGRESS_BAR_LENGTH)]
         embed = await print_tracking_stages(timestamp, tracking,reaction,verify,roster,response_message)
         await response.edit(embed)
-        log.info(f"*** | Finish Adding Reactions To Post | Message: {message_id} | ***")
+        log.info(f"*** | Finish Adding Reactions To Post | Already Added | Message: {message_id} | ***")
         return reaction
 
     reaction_progress = 0
@@ -241,6 +241,7 @@ async def add_reactions_to_post(ctx, message_id, response_message, response, tra
     await add_reaction(channel_id=ctx.channel_id, message_id=message_id, emoji_name="Interested", emoji_id="🔔", emoji="🔔")
     await add_reaction(channel_id=ctx.channel_id, message_id=message_id, emoji_name="New", emoji_id="🆕", emoji="🆕")
     await add_reaction(channel_id=ctx.channel_id, message_id=message_id, emoji_name="Filler", emoji_id="⭐", emoji="⭐")
+    
     current_progress = 3
 
     emojis = await mod_plugin.bot.rest.fetch_guild_emojis(guild=GUILD_ID)
@@ -285,11 +286,12 @@ async def updateInterestedUsers(channel_id: str, message_id: str, response, trac
     log.info(f"*** | Finish Update Insterested Users For Post | Message: {message_id} | ***")
     
     log.info(f"*** | Start Building Progress Bar For Post | Update Verify Stage | Message: {message_id} | ***")
+    
     verify = ["✅",build_progress_bar(PROGRESS_BAR_LENGTH,PROGRESS_BAR_LENGTH)]
     embed = await print_tracking_stages(timestamp, tracking,reaction,verify,roster,response_message)
     await response.edit(embed)
-    log.info(f"*** | Finish Building Progress Bar For Post | Update Verify Stage | Message: {message_id} | ***")
     
+    log.info(f"*** | Finish Building Progress Bar For Post | Update Verify Stage | Message: {message_id} | ***")
     
     return verify
 
