@@ -835,6 +835,13 @@ async def load(ctx:lightbulb.Context) -> None:
     log.info("*** | Finished Backup | ***")
 
 @mod_plugin.command
+@lightbulb.option(
+    "ephemeral",
+    "Forces the release notes to be invisible",
+    type=bool,
+    required=False,
+    default=True
+)
 @lightbulb.command("release_notes", "Release Notes (v1.0.0)")
 @lightbulb.implements(lightbulb.SlashCommand)
 async def load(ctx:lightbulb.Context) -> None:
@@ -846,7 +853,11 @@ async def load(ctx:lightbulb.Context) -> None:
     embed.add_field("Logging Handling","*Shibot sometimes makes mistakes, and that's ok.*")
     embed.set_thumbnail("https://github.com/twardle/DiscordBot_Hikari/blob/master/Shiba_logo.png?raw=true")
     embed.set_footer("Shibot v1.0.0")
-    await ctx.respond(embed,flags=hikari.MessageFlag.EPHEMERAL)
+    
+    if ctx.options.ephemeral :
+        await ctx.respond(embed,flags=hikari.MessageFlag.EPHEMERAL)
+    else :
+        await ctx.respond(embed)
     log.info("*** | Finished Release Notes | ***")
 
 ##########################################
