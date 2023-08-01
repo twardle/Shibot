@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os
+import os, logging
 import hikari
 import lightbulb
 from lightbulb import context as context_

@@ -3,3 +3,6 @@
 *.pyc
 shibot/extensions/__pycache__/
 shibot/__pycache__/
+tracking_backup.json
+backup/*
+log/*
