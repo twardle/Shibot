@@ -19,7 +19,7 @@ import calendar
 from datetime import datetime, timedelta
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
-from shibot import GUILD_ID, BOT_USER_ID
+from shibot import GUILD_ID, BOT_USER_ID, __version__
 from hikari.api.special_endpoints import MessageActionRowBuilder
 
 ##########################################
@@ -839,7 +839,7 @@ async def load(ctx:lightbulb.Context) -> None:
     required=False,
     default=True
 )
-@lightbulb.command("release_notes", "Release Notes (v0.3.1)")
+@lightbulb.command("release_notes", "Release Notes")
 @lightbulb.implements(lightbulb.SlashCommand)
 async def load(ctx:lightbulb.Context) -> None:
     log.info("*** | Start Release Notes | ***")
@@ -849,7 +849,7 @@ async def load(ctx:lightbulb.Context) -> None:
     embed.add_field("Caching Cleanup","*Shibot now only remembers the important things...*")
     embed.add_field("Logging Handling","*Shibot sometimes makes mistakes, and that's ok.*")
     embed.set_thumbnail("https://github.com/twardle/DiscordBot_Hikari/blob/master/Shiba_logo.png?raw=true")
-    embed.set_footer("Shibot v0.3.1")
+    embed.set_footer(f"Shibot {__version__}")
     
     if ctx.options.ephemeral :
         await ctx.respond(embed,flags=hikari.MessageFlag.EPHEMERAL)

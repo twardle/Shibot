@@ -1,7 +1,7 @@
 
 <img src="https://github.com/twardle/DiscordBot_Hikari/blob/master/Shiba_logo.png?raw=true" width="250">
 
-# Shibot v0.3.1
+# Shibot v0.3.1.2
 
 Shibot is a discord bot built to provide quick and simple signups for events, with a specific focus on Guild Wars 2 Raids.
 
