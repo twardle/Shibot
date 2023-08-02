@@ -226,7 +226,7 @@ async def add_reactions_to_post(ctx, message_id, response_message, response, tra
         return reaction
     
     iterator = await mod_plugin.bot.rest.fetch_reactions_for_emoji(channel=ctx.channel_id, message=message_id, emoji=emoji_dict.get("🔔")["emoji"])
-    already_added = next(user for user in iterator if user.id == BOT_USER_ID) is not None
+    already_added = [user for user in iterator if user.id == BOT_USER_ID]
     
     if already_added and not ctx.options.force_emojis:
         reaction = ["✅",build_progress_bar(PROGRESS_BAR_LENGTH,PROGRESS_BAR_LENGTH)]
@@ -502,14 +502,6 @@ async def update_specific_roster(ctx: lightbulb.UserContext, forum_event: ForumE
     iterator = await mod_plugin.bot.rest.fetch_reactions_for_emoji(channel=forum_event.channelid, message=forum_event.messageid, emoji=emoji_dict.get("🔔")["emoji"])
     users = [user for user in iterator if user.id != BOT_USER_ID]
     interested_users.update({forum_event.channelid: users})
-
-    valid_user = next(user for user in iterator if str(user.username) == str(ctx.author.username) )
-    
-    if valid_user is None:
-        embed = hikari.Embed(title="Error",color="#949fe6",description=f"{red_x} | Not Marked Interested")
-        await response.edit(embed)
-        log.info(f"*** | Finish Updating Specific Roster For Main Command | Message: {forum_event.messageid} | ***")
-        return None
     
     for emoji in emoji_dict.values() :
         current_progress += 1
