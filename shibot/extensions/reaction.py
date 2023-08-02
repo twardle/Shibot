@@ -19,7 +19,7 @@ import calendar
 from datetime import datetime, timedelta
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
-from shibot import GUILD_ID, BOT_USER_ID, __version__
+from shibot import GUILD_ID, BOT_USER_ID, DEV_BOT_USER_ID, __version__
 from hikari.api.special_endpoints import MessageActionRowBuilder
 
 ##########################################
@@ -54,6 +54,7 @@ class ForumEvent:
 ##                CONSTS                ##
 ##########################################
 
+MAX_LOADING_PERCENT = 100
 TRACKING_JSON_FILE = "backup/tracking_backup.json"
 INTERESTED_JSON_FILE = "backup/interested_backup.json"
 SERVER_TIME_OFFSET = timedelta(hours=4)
@@ -91,14 +92,13 @@ sched = AsyncIOScheduler()
 ##               CRON JOBS              ##
 ##########################################
 
-@sched.scheduled_job(CronTrigger(minute="*/5"))
+@sched.scheduled_job(CronTrigger(minute="*/30"))
 async def check_old_events() -> None:
-    await on_startup()
     
     to_remove = [
         event[0]
         for event in tracked_channels.items()
-        if event[1].event_timeout - timedelta(minutes=5) < datetime.now().replace(tzinfo=pytz.UTC)
+        if event[1].event_timeout - timedelta(minutes=30) < datetime.now().replace(tzinfo=pytz.UTC)
     ]
     
     for key in to_remove:
@@ -106,13 +106,10 @@ async def check_old_events() -> None:
         await mod_plugin.bot.rest.create_message(key, f"<#{key}> | Event signup period has ended.")
 
 @sched.scheduled_job(CronTrigger(minute="*/5"))
-async def update_roster() -> None:
-    await on_startup()
+async def update_rosters_cache_job() -> None:
+    log.info("*** | Start Update Roster Cache Job | ***")
     
     for forum_event in tracked_channels.values():
-        iterator = await mod_plugin.bot.rest.fetch_reactions_for_emoji(channel=forum_event.channelid, message=forum_event.messageid, emoji=emoji_dict.get("🔔")["emoji"])
-        users = [str(user.id) for user in iterator if user.id != BOT_USER_ID]
-        interested_users.update({forum_event.channelid: users})
         for emoji in emoji_dict.values() :
             if emoji["emoji"] == "🔔":
                 continue
@@ -121,7 +118,7 @@ async def update_roster() -> None:
 
 @sched.scheduled_job(CronTrigger(minute="*/5"))
 async def backup_tracked_files() -> None:
-    await on_startup()
+    log.info("*** | Start Building Json Backup | ***")
     
     try :
         await build_json(TRACKING_JSON_FILE, tracked_channels)
@@ -132,6 +129,7 @@ async def backup_tracked_files() -> None:
         await build_json(INTERESTED_JSON_FILE,interested_users)
     except FileNotFoundError:
         log.error(f"Interested File Doesn't Exist {INTERESTED_JSON_FILE}")
+    log.info("*** | Finish Building Json Backup | ***")
 
 ##########################################
 ##            REACTION EVENTS           ##
@@ -141,23 +139,18 @@ async def backup_tracked_files() -> None:
 async def print_reaction(event: hikari.ReactionEvent) -> None:
     global log, red_x_emoji, tracked_channels
     log.info("*** | Start Handle Reaction Event | ***")
-    red_x_emoji_link = str(red_x_emoji["emoji"])
     if not isinstance(event, hikari.ReactionAddEvent) and not isinstance(event, hikari.ReactionDeleteEvent) :
         log.info("*** | Finish Handle Reaction Event | Not Add/Delete | ***")
-        return
-    
-    # Ignore bot reactions
-    if event.user_id == BOT_USER_ID :
-        log.info("*** | Finish Handle Reaction Event | Bot User | ***")
-        return
-    
-    if event.emoji_name != "🔔" :
-        log.info("*** | Finish Handle Reaction Event | Non-Interested Reaction | ***")
         return
     
     if str(event.channel_id) not in tracked_channels:
         log.info("*** | Finish Handle Reaction Event | Not a Tracked Channel | ***")
         return;
+    
+    # Ignore bot reactions
+    if event.user_id == BOT_USER_ID or event.user_id == DEV_BOT_USER_ID :
+        log.info("*** | Finish Handle Reaction Event | Bot User | ***")
+        return
     
     tracked_event = tracked_channels.get(event.channel_id)
     
@@ -165,18 +158,21 @@ async def print_reaction(event: hikari.ReactionEvent) -> None:
         log.info("*** | Finish Handle Reaction Event | Not a Tracked Message | ***")
         return;
     
-    if isinstance(event, hikari.ReactionAddEvent):
-        await handle_reaction_add_event(event, red_x_emoji_link)
-    elif isinstance(event,hikari.ReactionDeleteEvent):
-        await handle_reaction_delete_event(event, red_x_emoji_link)
+    red_x_emoji_link = str(red_x_emoji["emoji"])
+    
+    if event.emoji_name == "🔔" and isinstance(event, hikari.ReactionAddEvent):
+        await handle_interested_reaction_add_event(event, red_x_emoji_link)
+    elif event.emoji_name == "🔔" and isinstance(event,hikari.ReactionDeleteEvent):
+        await handle_interested_reaction_delete_event(event, red_x_emoji_link)
     else: 
-        log.error(f"Unhandled Event Type: {event}")
+        event_string = str(event).encode("utf-8")
+        log.error(f"Unhandled Event Type: {event_string}")
         
     log.info("*** | Finish Handle Reaction Event | ***")
     
     return
 
-async def handle_reaction_delete_event(forum_event, red_x_emoji_link):
+async def handle_interested_reaction_delete_event(forum_event, red_x_emoji_link):
     global log
     log.info("*** | Start Handle Reaction Delete Event | ***")
     
@@ -190,7 +186,7 @@ async def handle_reaction_delete_event(forum_event, red_x_emoji_link):
     
     log.info("*** | Finish Handle Reaction Delete Event | ***")
 
-async def handle_reaction_add_event(forum_event, red_x_emoji_link):
+async def handle_interested_reaction_add_event(forum_event, red_x_emoji_link):
     global log, interested_users
     log.info("*** | Start Handle Reaction Add Event | ***")
     
@@ -230,7 +226,7 @@ async def add_reactions_to_post(ctx, message_id, response_message, response, tra
         return reaction
     
     iterator = await mod_plugin.bot.rest.fetch_reactions_for_emoji(channel=ctx.channel_id, message=message_id, emoji=emoji_dict.get("🔔")["emoji"])
-    already_added = [user for user in iterator if user.id == BOT_USER_ID]
+    already_added = [user for user in iterator if user.id == BOT_USER_ID or user.id == DEV_BOT_USER_ID ]
     
     if already_added and not ctx.options.force_emojis:
         reaction = ["✅",build_progress_bar(PROGRESS_BAR_LENGTH,PROGRESS_BAR_LENGTH)]
@@ -284,7 +280,7 @@ async def updateInterestedUsers(channel_id: str, message_id: str, response, trac
     
     timestamp = generate_discord_timestamp(datetime.now())
     iterator = await mod_plugin.bot.rest.fetch_reactions_for_emoji(channel=channel_id, message=message_id, emoji=emoji_dict.get("🔔")["emoji"])
-    users = [str(user.id) for user in iterator if user.id != BOT_USER_ID]
+    users = [str(user.id) for user in iterator if user.id != BOT_USER_ID and user.id != DEV_BOT_USER_ID]
     interested_users.update({channel_id: users})
     
     log.info(f"*** | Finish Update Insterested Users For Post | Message: {message_id} | ***")
@@ -328,7 +324,7 @@ async def build_tracking_info(ctx, channel_id, message_id, event_id, response_me
     
     return forum_event, tracking
 
-async def update_roster(buildCache, forum_event: ForumEvent, response, tracking, reaction, verify, roster, response_message) -> None:
+async def update_all_rosters(buildCache, forum_event: ForumEvent, response, tracking, reaction, verify, roster, response_message) -> None:
     global log
     log.info(f"*** | Start Building Roster For Post | Update Roster Stage | Message: {forum_event.messageid} | ***")
     timestamp = generate_discord_timestamp(datetime.now())
@@ -466,7 +462,7 @@ async def fetch_emoji_info(forum_event: ForumEvent, emoji):
     users = await mod_plugin.bot.rest.fetch_reactions_for_emoji(forum_event.channelid, message=forum_event.messageid, emoji=emoji_link)
     user_mentions = ""
     for user in users :
-        if str(user.id) not in interested_users[forum_event.channelid] :
+        if str(user.id) not in interested_users[str(forum_event.channelid)] :
             continue
         
         is_main = False
@@ -499,12 +495,14 @@ async def update_specific_roster(ctx: lightbulb.UserContext, forum_event: ForumE
     roster_progress = 0
     current_progress = 0
     
-    embed = hikari.Embed(title="Updating Roster State...",color="#949fe6")
-    progress = build_progress_bar(roster_progress,PROGRESS_BAR_LENGTH)
-    embed.add_field(f"{red_x} | Roster Loading...", progress)
-    response = await ctx.respond(embed,flags=hikari.MessageFlag.EPHEMERAL)
+    if ctx :
+        embed = hikari.Embed(title="Updating Roster State...",color="#949fe6")
+        progress = build_progress_bar(roster_progress,PROGRESS_BAR_LENGTH)
+        embed.add_field(f"{red_x} | Roster Loading...", progress)
+        response = await ctx.respond(embed,flags=hikari.MessageFlag.EPHEMERAL)
+    
     iterator = await mod_plugin.bot.rest.fetch_reactions_for_emoji(channel=forum_event.channelid, message=forum_event.messageid, emoji=emoji_dict.get("🔔")["emoji"])
-    users = [str(user.id) for user in iterator if user.id != BOT_USER_ID]
+    users = [str(user.id) for user in iterator if user.id != BOT_USER_ID and user.id == DEV_BOT_USER_ID]
     
     interested_users.update({forum_event.channelid: users})
     
@@ -514,22 +512,24 @@ async def update_specific_roster(ctx: lightbulb.UserContext, forum_event: ForumE
             continue
         user_mentions = await fetch_emoji_info(forum_event, emoji)
         forum_event.roster_cache.update({str(emoji["id"]): user_mentions})
-        roster_progress = (current_progress * PROGRESS_BAR_LENGTH) / len(emoji_dict.values())
-        progress = build_progress_bar(int(roster_progress),PROGRESS_BAR_LENGTH)
-        embed = hikari.Embed(title="Updating Roster State...",color="#949fe6")
-        embed.add_field(f"{red_x} | Roster Loading...", progress)
-        await response.edit(embed)
+        
+        if ctx:
+            roster_progress = (current_progress * PROGRESS_BAR_LENGTH) / len(emoji_dict.values())
+            progress = build_progress_bar(int(roster_progress),PROGRESS_BAR_LENGTH)
+            embed = hikari.Embed(title="Updating Roster State...",color="#949fe6")
+            embed.add_field(f"{red_x} | Roster Loading...", progress)
+            await response.edit(embed)
         
     log.info(f"*** | Finish Updating Specific Roster For Main Command | Message: {forum_event.messageid} | ***")
     
-    log.info(f"*** | Start Building Progress Bar For Main Command | Message: {forum_event.messageid} | ***")
-    progress = build_progress_bar(PROGRESS_BAR_LENGTH,PROGRESS_BAR_LENGTH)
-    embed = hikari.Embed(title="Updating Roster State...",color="#949fe6")
-    embed.add_field("✅ | Roster Loading...", progress)
-    await response.edit(embed)
-    log.info(f"*** | Finish Building Progress Bar For Main Command | Message: {forum_event.messageid} | ***")
-    
-    return response
+    if ctx:
+        log.info(f"*** | Start Building Progress Bar For Main Command | Message: {forum_event.messageid} | ***")
+        progress = build_progress_bar(PROGRESS_BAR_LENGTH,PROGRESS_BAR_LENGTH)
+        embed = hikari.Embed(title="Updating Roster State...",color="#949fe6")
+        embed.add_field("✅ | Roster Loading...", progress)
+        await response.edit(embed)
+        log.info(f"*** | Finish Building Progress Bar For Main Command | Message: {forum_event.messageid} | ***")
+        return response
 
 async def handle_response_main(bot: lightbulb.BotApp,author: hikari.User,message: hikari.Message, list, forum_event: ForumEvent, footer, ) -> None:
     global log
@@ -639,30 +639,23 @@ async def validate_authorized_user(ctx) -> bool:
 
 async def build_json(filename, structure):
     global log
-    log.info("*** | Start Building Json Backup | ***")
     json_output = jsonpickle.encode(structure)
-    log.info("*** | Finish Building Json Backup | ***")
-    
-    log.info("*** | Start Saving Json Backup | ***")
     with open(filename, "w") as outfile:
         outfile.write(json_output)
-    log.info("*** | Finish Saving Json Backup | ***")
     
     return
 
 def load_tracked_file_json_backup(filename):
     global log, tracked_channels
-    log.info("*** | Start Loading Tracked Json Backup| ***")
+    log.info("*** | Loading Tracked Json Backup| ***")
     with open(filename, 'r') as infile:
         tracked_channels = jsonpickle.decode(infile.read())
-    log.info("*** | Start Finish Tracked Json Backup | ***")
 
 def load_interested_file_json_backup(filename):
     global log, interested_users
-    log.info("*** | Start Loading Interested Json Backup| ***")
+    log.info("*** | Loading Interested Json Backup| ***")
     with open(filename, 'r') as infile:
         interested_users = jsonpickle.decode(infile.read())
-    log.info("*** | Start Finish Interested Json Backup | ***")
 
 ##########################################
 ##               COMMANDS               ##
@@ -713,7 +706,7 @@ def load_interested_file_json_backup(filename):
 @lightbulb.implements(lightbulb.SlashCommand)
 async def track_post(ctx: lightbulb.Context) -> None:
     global red_x_emoji
-    await on_startup()
+    await on_startup(ctx)
     authorized = await validate_authorized_user(ctx)
     
     if authorized == False:
@@ -746,7 +739,7 @@ async def track_post(ctx: lightbulb.Context) -> None:
     
     verify = await updateInterestedUsers(ctx.channel_id, message_id, response, tracking,reaction,verify,roster, response_message)
     
-    roster = await update_roster(ctx.options.build_cache, tracking_event, response, tracking,reaction,verify,roster,response_message)
+    roster = await update_all_rosters(ctx.options.build_cache, tracking_event, response, tracking,reaction,verify,roster,response_message)
     
     now = datetime.now(pytz.timezone('America/New_York')).strftime("%m/%d/%Y %I:%M:%S %p")
     log.info(f"*** | Authorized Command Complete | {ctx.author} | {ctx.get_channel().name} | Executed /{ctx.command.name} | ***")
@@ -763,7 +756,7 @@ async def track_post(ctx: lightbulb.Context) -> None:
 @lightbulb.implements(lightbulb.SlashCommand)
 async def check_roster(ctx: lightbulb.Context) -> None:
     global tracked_channels
-    await on_startup()
+    await on_startup(ctx)
     
     event = tracked_channels.get(f"{ctx.channel_id}")
     
@@ -785,7 +778,7 @@ async def check_roster(ctx: lightbulb.Context) -> None:
 @lightbulb.command("main", "Allows a user to set a main role based on their reactions. Disabled for Custom Events.")
 @lightbulb.implements(lightbulb.SlashCommand)
 async def set_main(ctx:lightbulb.Context) -> None:
-    await on_startup()
+    await on_startup(ctx)
         
     event = tracked_channels.get(f"{ctx.channel_id}")
     if not event or event.custom == True :
@@ -806,11 +799,10 @@ async def set_main(ctx:lightbulb.Context) -> None:
         return
 
 @mod_plugin.command
-@lightbulb.command("load", "Initial Startup")
+@lightbulb.command("init", "Initial Startup")
 @lightbulb.implements(lightbulb.SlashCommand)
-async def load(ctx:lightbulb.Context) -> None:
-    log.info("*** | Start Initializing Mod | ***")
-    success = await on_startup()
+async def init(ctx:lightbulb.Context) -> None:
+    success = await on_startup(ctx)
 
     if success:
         embed = hikari.Embed(title="Finished Initializing Mod",color="#949fe6")
@@ -818,7 +810,6 @@ async def load(ctx:lightbulb.Context) -> None:
         embed = hikari.Embed(title="Mod Already Initialized...",color="#949fe6")
     
     await ctx.respond(embed,flags=hikari.MessageFlag.EPHEMERAL)
-    log.info("*** | Finish Initializing Mod | ***")
 
 @mod_plugin.command
 @lightbulb.command("backup", "Forced Backup")
@@ -861,35 +852,102 @@ async def load(ctx:lightbulb.Context) -> None:
 ##               START UP               ##
 ##########################################
 
-async def on_startup() :
-    global log, reloaded, red_x_emoji, emoji_dict, tracked_channels, sched
+async def on_startup(ctx:lightbulb.Context) :
+    global log, reloaded, sched
+    log.info("*** | Initializing Bot | ***")
     
     if reloaded == 1:
+        log.info("*** | Bot Initialization Already Complete | ***")
         return False
     
-    log = logging.getLogger(__name__)
-    info_handler = logging.FileHandler('log/shibot.log')
-    info_handler.setLevel(logging.INFO)
-    log.addHandler(info_handler)
-    error_handler = logging.FileHandler('log/shibot_error.log')
-    error_handler.setLevel(logging.ERROR)
-    log.addHandler(error_handler)
+    embed = hikari.Embed(title="Initializing Mod...",color="#949fe6")
+    response = await ctx.respond(embed,flags=hikari.MessageFlag.EPHEMERAL)
     
-    try :
-        load_tracked_file_json_backup(TRACKING_JSON_FILE)
-    except FileNotFoundError:
-        log.error(f"Tracking File Doesn't Exist {TRACKING_JSON_FILE}")
+    await build_loggers()
     
-    try :
-        load_interested_file_json_backup(INTERESTED_JSON_FILE)
-    except FileNotFoundError:
-        log.error(f"Tracking File Doesn't Exist {TRACKING_JSON_FILE}")
+    await fetch_red_x_emoji(response)
     
-    emojis = await mod_plugin.bot.rest.fetch_guild_emojis(guild=GUILD_ID)
-    for emoji in emojis :
-        if str(emoji.id) == RED_X_EMOJI_ID :
-            red_x_emoji = DefaultEmoji(name=emoji.name, id=emoji.id, emoji=emoji)
-            break;
+    log.info("*** | Loading Backups | ***")
+    
+    await load_backup_files(response)
+    
+    log.info("*** | Building Emoji Dictionary | ***")
+    
+    await build_emoji_dict(response)
+    
+    log.info("*** | Fetching Newly Interested Users | ***")
+    
+    await fetch_newly_interested_users(response)
+    
+    log.info("*** | Rebuilding Roster Cache | ***")
+    
+    await update_roster_cache(response)
+    
+    log.info("*** | Starting Cron Jobs | ***")
+    
+    sched.start()
+    
+    current_percent = 100
+    adjusted_progress = (current_percent * PROGRESS_BAR_LENGTH) / MAX_LOADING_PERCENT
+    progress = build_progress_bar(int(adjusted_progress),PROGRESS_BAR_LENGTH)
+    embed = hikari.Embed(title="Initializing Mod...",color="#949fe6")
+    embed.add_field(f"✅ | Roster Loading...", progress)
+    await response.edit(embed)
+    
+    log.info("*** | Finished Initializing Bot | ***")
+    
+    reloaded = 1
+    return True
+
+async def update_roster_cache(response):
+    global red_x_emoji, tracked_channels
+    red_x = red_x_emoji["emoji"]
+    
+    start_percent = 35
+    max_gained_percent=45
+    current_iteration=1
+    
+    for forum_event in tracked_channels.values():
+        current_progress = ((current_iteration-1) * max_gained_percent)/len(tracked_channels)
+        adjusted_progress = ((start_percent + current_progress) * PROGRESS_BAR_LENGTH) / MAX_LOADING_PERCENT
+        progress = build_progress_bar(int(adjusted_progress),PROGRESS_BAR_LENGTH)
+        embed = hikari.Embed(title="Initializing Mod...",color="#949fe6")
+        embed.add_field(f"{red_x} | Updating Roster Cache... ({current_iteration}/{len(tracked_channels)})", progress)
+        await response.edit(embed)
+        current_iteration += 1
+        
+        await update_specific_roster(None, forum_event=forum_event)
+    
+    current_progress = 80
+    adjusted_progress = (current_progress * PROGRESS_BAR_LENGTH) / MAX_LOADING_PERCENT
+    progress = build_progress_bar(int(adjusted_progress),PROGRESS_BAR_LENGTH)
+    embed = hikari.Embed(title="Initializing Mod...",color="#949fe6")
+    embed.add_field(f"{red_x} | Starting Job Schedules...", progress)
+    await response.edit(embed)
+    
+
+async def fetch_newly_interested_users(response):
+    global red_x_emoji
+    red_x = red_x_emoji["emoji"]
+    
+    for forum_event in tracked_channels.values():
+        try :
+            reactions = await mod_plugin.bot.rest.fetch_reactions_for_emoji(channel=forum_event.channelid, message=forum_event.messageid, emoji=emoji_dict.get("🔔")["emoji"])
+        except hikari.errors.NotFoundError:
+            log.warn("*** | Start Update Roster Job | Channel/Message Doesn't Exist | Channel: {forum_event.channelid} | Message: {forum_event.messageid} | ***")
+        users = [str(user.id) for user in reactions if user.id != BOT_USER_ID and user.id != DEV_BOT_USER_ID]
+        interested_users.update({forum_event.channelid: users})
+    
+    current_percent = 35
+    adjusted_progress = (current_percent * PROGRESS_BAR_LENGTH) / MAX_LOADING_PERCENT
+    progress = build_progress_bar(int(adjusted_progress),PROGRESS_BAR_LENGTH)
+    embed = hikari.Embed(title="Initializing Mod...",color="#949fe6")
+    embed.add_field(f"{red_x} | Updating Roster Cache...", progress)
+    await response.edit(embed)
+
+async def build_emoji_dict(response):
+    global red_x_emoji
+    red_x = red_x_emoji["emoji"]
     
     saved_emoji = DefaultEmoji(name="Interested", id="🔔", emoji="🔔")
     emoji_dict.update({"🔔":saved_emoji})
@@ -905,10 +963,61 @@ async def on_startup() :
             saved_emoji = DefaultEmoji(name=str(emoji.name), id=emoji_id, emoji=emoji)
             emoji_dict.update({emoji_id: saved_emoji})
     
-    sched.start()
+    current_percent = 25
+    adjusted_progress = (current_percent * PROGRESS_BAR_LENGTH) / MAX_LOADING_PERCENT
+    progress = build_progress_bar(int(adjusted_progress),PROGRESS_BAR_LENGTH)
+    embed = hikari.Embed(title="Initializing Mod...",color="#949fe6")
+    embed.add_field(f"{red_x} | Fetching Interested Users...", progress)
+    await response.edit(embed)
+
+async def load_backup_files(response):
+    global red_x_emoji
+    red_x = red_x_emoji["emoji"]
     
-    reloaded = 1
-    return True
+    try :
+        load_tracked_file_json_backup(TRACKING_JSON_FILE)
+    except FileNotFoundError:
+        log.error(f"Tracking File Doesn't Exist {TRACKING_JSON_FILE}")
+    
+    try :
+        load_interested_file_json_backup(INTERESTED_JSON_FILE)
+    except FileNotFoundError:
+        log.error(f"Tracking File Doesn't Exist {TRACKING_JSON_FILE}")
+    
+    current_percent = 15
+    adjusted_progress = (current_percent * PROGRESS_BAR_LENGTH) / MAX_LOADING_PERCENT
+    progress = build_progress_bar(int(adjusted_progress),PROGRESS_BAR_LENGTH)
+    embed = hikari.Embed(title="Initializing Mod...",color="#949fe6")
+    embed.add_field(f"{red_x} | Emoji Dictionary Loading...", progress)
+    await response.edit(embed)
+
+async def fetch_red_x_emoji(response):
+    global red_x_emoji
+    
+    emojis = await mod_plugin.bot.rest.fetch_guild_emojis(guild=GUILD_ID)
+    for emoji in emojis :
+        if str(emoji.id) == RED_X_EMOJI_ID :
+            red_x_emoji = DefaultEmoji(name=emoji.name, id=emoji.id, emoji=emoji)
+            break;
+        
+    red_x = red_x_emoji["emoji"]
+    
+    current_percent = 5
+    adjusted_progress = (current_percent * PROGRESS_BAR_LENGTH) / MAX_LOADING_PERCENT
+    progress = build_progress_bar(int(adjusted_progress),PROGRESS_BAR_LENGTH)
+    embed = hikari.Embed(title="Initializing Mod...",color="#949fe6")
+    embed.add_field(f"{red_x} | Importing Backup Files...", progress)
+    await response.edit(embed)
+
+async def build_loggers():
+    
+    log = logging.getLogger(__name__)
+    info_handler = logging.FileHandler('log/shibot.log')
+    info_handler.setLevel(logging.INFO)
+    log.addHandler(info_handler)
+    error_handler = logging.FileHandler('log/shibot_error.log')
+    error_handler.setLevel(logging.ERROR)
+    log.addHandler(error_handler)
     
 def load(bot: lightbulb.BotApp) -> None:    
     jsonpickle.set_encoder_options('simplejson', use_decimal=True, indent=4)
