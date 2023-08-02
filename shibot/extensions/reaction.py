@@ -12,7 +12,7 @@ import jsonpickle as jsonpickle
 import simplejson
 import lightbulb
 import hikari
-import pytz, time
+import pytz
 from typing import TypedDict, Dict, List, Iterable
 from pytz import timezone
 import calendar
@@ -176,35 +176,39 @@ async def print_reaction(event: hikari.ReactionEvent) -> None:
     
     return
 
-async def handle_reaction_delete_event(event, red_x_emoji_link):
+async def handle_reaction_delete_event(forum_event, red_x_emoji_link):
     global log
     log.info("*** | Start Handle Reaction Delete Event | ***")
     
-    messages = await mod_plugin.bot.rest.fetch_messages(event.channel_id)
+    messages = await mod_plugin.bot.rest.fetch_messages(forum_event.channel_id)
     for message in messages:
         if not message.content :
             continue;
-        if red_x_emoji_link in message.content and f"{event.user_id}" in message.content :
-            await mod_plugin.bot.rest.delete_message(message=message.id, channel=event.channel_id)
-    await mod_plugin.bot.rest.create_message(event.channel_id, f" {red_x_emoji_link} | <@{event.user_id}> | No longer interested in attending the event.")
+        if red_x_emoji_link in message.content and f"{forum_event.user_id}" in message.content :
+            await mod_plugin.bot.rest.delete_message(message=message.id, channel=forum_event.channel_id)
+    await mod_plugin.bot.rest.create_message(forum_event.channel_id, f" {red_x_emoji_link} | <@{forum_event.user_id}> | No longer interested in attending the event.")
     
     log.info("*** | Finish Handle Reaction Delete Event | ***")
 
-async def handle_reaction_add_event(event, red_x_emoji_link):
+async def handle_reaction_add_event(forum_event, red_x_emoji_link):
     global log, interested_users
     log.info("*** | Start Handle Reaction Add Event | ***")
     
-    messages = await mod_plugin.bot.rest.fetch_messages(event.channel_id)
+    messages = await mod_plugin.bot.rest.fetch_messages(forum_event.channel_id)
     for message in messages:
         if not message.content :
             continue;
-        if "✅" in message.content and f"{event.user_id}" in message.content :
-            await mod_plugin.bot.rest.delete_message(message=message.id, channel=event.channel_id)
-        if red_x_emoji_link in message.content and f"{event.user_id}" in message.content :
-            await mod_plugin.bot.rest.delete_message(message=message.id, channel=event.channel_id)
+        if "✅" in message.content and f"{forum_event.user_id}" in message.content :
+            await mod_plugin.bot.rest.delete_message(message=message.id, channel=forum_event.channel_id)
+        if red_x_emoji_link in message.content and f"{forum_event.user_id}" in message.content :
+            await mod_plugin.bot.rest.delete_message(message=message.id, channel=forum_event.channel_id)
     
-    interested_users.get(str(event.channel_id)).append(str(event.user_id))
-    await mod_plugin.bot.rest.create_message(event.channel_id, f" ✅ | <@{event.user_id}> | Interested in attending.")
+    if interested_users.get(str(forum_event.channel_id)) :
+        interested_users.get(str(forum_event.channel_id)).append(str(forum_event.user_id))
+    else :
+        interested_users.update({forum_event.channel_id: str(forum_event.user_id)})
+    
+    await mod_plugin.bot.rest.create_message(forum_event.channel_id, f" ✅ | <@{forum_event.user_id}> | Interested in attending.")
     
     log.info("*** | Finish Handle Reaction Add Event | ***")
 
@@ -500,7 +504,8 @@ async def update_specific_roster(ctx: lightbulb.UserContext, forum_event: ForumE
     embed.add_field(f"{red_x} | Roster Loading...", progress)
     response = await ctx.respond(embed,flags=hikari.MessageFlag.EPHEMERAL)
     iterator = await mod_plugin.bot.rest.fetch_reactions_for_emoji(channel=forum_event.channelid, message=forum_event.messageid, emoji=emoji_dict.get("🔔")["emoji"])
-    users = [user for user in iterator if user.id != BOT_USER_ID]
+    users = [str(user.id) for user in iterator if user.id != BOT_USER_ID]
+    
     interested_users.update({forum_event.channelid: users})
     
     for emoji in emoji_dict.values() :
