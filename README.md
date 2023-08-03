@@ -1,7 +1,7 @@
 
 <img src="https://github.com/twardle/DiscordBot_Hikari/blob/master/Shiba_logo.png?raw=true" width="250">
 
-# Shibot v0.3.1.2
+# Shibot v0.4.1
 
 Shibot is a discord bot built to provide quick and simple signups for events, with a specific focus on Guild Wars 2 Raids.
 
@@ -23,15 +23,24 @@ Shibot is a discord bot built to provide quick and simple signups for events, wi
     - Shibot maintains a record of the current on hardware to allow it to quickly restore itself from backup in the event of an unexpected termination.
 - **Caching**
     - Shibot maintains a record of important info about a tracked channel to allow for seemless execution of commands by users simultaneously
-## Roadmap
+- **Database Integration**
+    - Shibot maintains an active database of all currently tracked events to allow for faster response times without the need for unnecessary API calls and more secure compared to caching everything to memory.
+## Tech Stack
 
-- Database Integration
+**Language:** Python
+
+**API:** Hikari Lightbulb
+
+**Database:** PostgreSQL 11.19 
+
+
+## Roadmap
 
 - Permission Cleanup
 
 - Additional Commands
     - /Special - Allows users to sign up for special roles
-
+    - /Untrack - Allows users to cleanup unnecessary events
 
 ## Feedback
 

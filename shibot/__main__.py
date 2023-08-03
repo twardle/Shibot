@@ -3,6 +3,7 @@ import os, logging
 import hikari
 import lightbulb
 from lightbulb import context as context_
+from shibot import database
 
 from shibot import GUILD_ID
 
@@ -29,11 +30,21 @@ bot = lightbulb.BotApp(
     default_enabled_guilds=GUILD_ID,
 )
 
+log = logging.getLogger(__name__)
+info_handler = logging.FileHandler('log/shibot.log')
+info_handler.setLevel(logging.INFO)
+log.addHandler(info_handler)
+error_handler = logging.FileHandler('log/shibot_error.log')
+error_handler.setLevel(logging.ERROR)
+log.addHandler(error_handler)
+
 bot.load_extensions_from("./shibot/extensions")
 
 if __name__ == "__main__":
     if os.name != "nt":
             import uvloop
             uvloop.install()
-
+    
+    database.version()
+    
     bot.run()

@@ -21,6 +21,19 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from shibot import GUILD_ID, BOT_USER_ID, DEV_BOT_USER_ID, __version__
 from hikari.api.special_endpoints import MessageActionRowBuilder
+import logging
+
+##########################################
+##                LOGGER                ##
+##########################################
+
+log = logging.getLogger(__name__)
+info_handler = logging.FileHandler('log/shibot.log')
+info_handler.setLevel(logging.INFO)
+log.addHandler(info_handler)
+error_handler = logging.FileHandler('log/shibot_error.log')
+error_handler.setLevel(logging.ERROR)
+log.addHandler(error_handler)
 
 ##########################################
 ##               CLASSES                ##
@@ -84,8 +97,6 @@ reloaded = 0
 ##                 LOGGER               ##
 ##########################################
 
-log = logging.getLogger(__name__)
-
 sched = AsyncIOScheduler()
 
 ##########################################
@@ -137,7 +148,7 @@ async def backup_tracked_files() -> None:
 
 @mod_plugin.listener(hikari.ReactionEvent)
 async def print_reaction(event: hikari.ReactionEvent) -> None:
-    global log, red_x_emoji, tracked_channels
+    global red_x_emoji, tracked_channels
     log.info("*** | Start Handle Reaction Event | ***")
     if not isinstance(event, hikari.ReactionAddEvent) and not isinstance(event, hikari.ReactionDeleteEvent) :
         log.info("*** | Finish Handle Reaction Event | Not Add/Delete | ***")
@@ -187,7 +198,7 @@ async def handle_interested_reaction_delete_event(forum_event, red_x_emoji_link)
     log.info("*** | Finish Handle Reaction Delete Event | ***")
 
 async def handle_interested_reaction_add_event(forum_event, red_x_emoji_link):
-    global log, interested_users
+    global interested_users
     log.info("*** | Start Handle Reaction Add Event | ***")
     
     messages = await mod_plugin.bot.rest.fetch_messages(forum_event.channel_id)
@@ -646,13 +657,13 @@ async def build_json(filename, structure):
     return
 
 def load_tracked_file_json_backup(filename):
-    global log, tracked_channels
+    global tracked_channels
     log.info("*** | Loading Tracked Json Backup| ***")
     with open(filename, 'r') as infile:
         tracked_channels = jsonpickle.decode(infile.read())
 
 def load_interested_file_json_backup(filename):
-    global log, interested_users
+    global interested_users
     log.info("*** | Loading Interested Json Backup| ***")
     with open(filename, 'r') as infile:
         interested_users = jsonpickle.decode(infile.read())
@@ -853,7 +864,7 @@ async def load(ctx:lightbulb.Context) -> None:
 ##########################################
 
 async def on_startup(ctx:lightbulb.Context) :
-    global log, reloaded, sched
+    global reloaded, sched
     log.info("*** | Initializing Bot | ***")
     
     if reloaded == 1:
@@ -862,8 +873,6 @@ async def on_startup(ctx:lightbulb.Context) :
     
     embed = hikari.Embed(title="Initializing Mod...",color="#949fe6")
     response = await ctx.respond(embed,flags=hikari.MessageFlag.EPHEMERAL)
-    
-    await build_loggers()
     
     await fetch_red_x_emoji(response)
     
@@ -1008,16 +1017,6 @@ async def fetch_red_x_emoji(response):
     embed = hikari.Embed(title="Initializing Mod...",color="#949fe6")
     embed.add_field(f"{red_x} | Importing Backup Files...", progress)
     await response.edit(embed)
-
-async def build_loggers():
-    
-    log = logging.getLogger(__name__)
-    info_handler = logging.FileHandler('log/shibot.log')
-    info_handler.setLevel(logging.INFO)
-    log.addHandler(info_handler)
-    error_handler = logging.FileHandler('log/shibot_error.log')
-    error_handler.setLevel(logging.ERROR)
-    log.addHandler(error_handler)
     
 def load(bot: lightbulb.BotApp) -> None:    
     jsonpickle.set_encoder_options('simplejson', use_decimal=True, indent=4)
