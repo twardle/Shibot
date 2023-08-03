@@ -1,6 +1,7 @@
 from configparser import ConfigParser
 import psycopg2
 import logging
+import peewee
 
 log = logging.getLogger(__name__)
 info_handler = logging.FileHandler('log/shibot.log')
@@ -22,41 +23,16 @@ def config(filename='cfg/database.ini', section='postgresql'):
     return {param[0]: param[1] for param in params}
 
 def version():
-    """ Connect to the PostgreSQL database server """
-    conn = None
-    try:
-        # read connection parameters
-        conn = get_database_connection()
-		
-        # create a cursor
-        cur = conn.cursor()
-        
-	    # execute a statement
-        log.info('PostgreSQL database version:')
-        db_version = execute_select_statement(cur, 'SELECT version()')
-        log.info(db_version)
-	    # close the communication with the PostgreSQL
-        cur.close()
-    except (Exception, psycopg2.DatabaseError) as error:
-        log.error(error)
-    finally:
-        if conn is not None:
-            conn.close()
-            log.info('Database connection closed.')
+    # read connection parameters
+    db : peewee.PostgresqlDatabase = get_database_connection()
+    
+    with db:
+        cursor = db.execute_sql('SELECT version()')
+        log.info(cursor.fetchone())
 
-def execute_select_statement(cur, statement):
-    cur.execute(statement)
-
-        # display the PostgreSQL database server version
-    return cur.fetchall()
-
-def execute_modify_statement(cur, statement):
-    cur.execute(statement)
-
-        # display the PostgreSQL database server version
-    return cur.statusmessage()
-
-def get_database_connection():
+def get_database_connection() -> peewee.PostgresqlDatabase:
     # connect to the PostgreSQL server
     log.info('Connecting to the PostgreSQL database...')
-    return psycopg2.connect(**config())
+    return peewee.PostgresqlDatabase(
+        **config()
+    )
