@@ -140,17 +140,17 @@ async def print_tracking_stages(timestamp, tracking_stage, reaction_stage, messa
     embed = Embed(title="Registering Event For Tracking...",color="#949fe6")
     
     embed.add_field(f"{tracking_stage[0]} | Building Tracking Info...", tracking_stage[1])
-    progress_state = 3 if tracking_stage[0] == "✅" else 0
+    progress_state = int((3 * int(tracking_stage[1].count('▓'))) / PROGRESS_BAR_LENGTH)
 
     embed.add_field(f"{reaction_stage[0]} | Adding Emojis to Message...", reaction_stage[1])
-    progress_state += 22 if reaction_stage[0] == "✅" else 0
+    progress_state += int((22 * int(reaction_stage[1].count('▓'))) / PROGRESS_BAR_LENGTH)
     
     if reaction_stage[0] != "✅":
         embed.add_field(f"{red_x_emoji} | Working on Registering Event for Tracking.", message)
     else: 
         embed.add_field("✅ | Finished Registering Event for Tracking.", message)
     
-    progress_bar = helper.build_progress_bar(progress_state=total_progress_amount, max_state=PROGRESS_BAR_LENGTH)
+    progress_bar = helper.build_progress_bar(progress_state=progress_state, max_state=PROGRESS_BAR_LENGTH)
     
     embed.add_field(progress_bar, f"Last update processed <t:{timestamp}:R>")
 
@@ -165,7 +165,7 @@ def calc_total_progress(tracking_stage, reaction_stage):
                 tracking_progress_amount
                 + reaction_progress_amount
             )
-            / (PROGRESS_BAR_LENGTH * 4)
+            / (PROGRESS_BAR_LENGTH * 2)
         )
         * PROGRESS_BAR_LENGTH
     )
