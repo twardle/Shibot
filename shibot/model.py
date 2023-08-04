@@ -111,6 +111,7 @@ class Message(BaseModel):
 class Track(BaseModel):
     channel = ForeignKeyField(column_name='CHANNEL_ID', field='id', model=Channel, null=True)
     creator = ForeignKeyField(column_name='CREATOR_ID', field='id', model=User, null=True)
+    custom = BooleanField(column_name='CUSTOM', constraints=[SQL("DEFAULT false")], null=True)
     event = ForeignKeyField(column_name='EVENT_ID', field='id', model=Event, null=True)
     id = BigAutoField(column_name='ID',primary_key=True)
     message = ForeignKeyField(column_name='MESSAGE_ID', field='id', model=Message, null=True)

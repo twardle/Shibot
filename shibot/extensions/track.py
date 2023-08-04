@@ -17,11 +17,6 @@ error_handler.setLevel(logging.ERROR)
 log.addHandler(error_handler)
 
 red_x_emoji = None
-
-##########################################
-##               CLASSES                ##
-##########################################
-
 emoji_cache = {}
 
 ##########################################
@@ -86,14 +81,6 @@ async def add_reactions_to_post(ctx, message:PartialMessage, response_message, r
     log.info(f"*** | Start Adding Reactions To Post | Message: {message.id} | ***")
     timestamp = helper.generate_discord_timestamp(datetime.now())
 
-    if ctx.options.custom:
-        reaction = ["✅",helper.build_progress_bar(PROGRESS_BAR_LENGTH,PROGRESS_BAR_LENGTH)]
-        embed = await print_tracking_stages(timestamp, tracking,reaction,response_message)
-        await response.edit(embed)
-
-        log.info(f"*** | Finish Adding Reactions To Post | Custom Post | Message: {message.id} | ***")
-        return reaction
-
     iterator = await bot_plugin.bot.rest.fetch_reactions_for_emoji(channel=ctx.channel_id, message=message.id, emoji="🔔")
     for message_reactions in message.reactions:
         if message_reactions.emoji == "🔔" and message_reactions.is_me:
@@ -109,6 +96,14 @@ async def add_reactions_to_post(ctx, message:PartialMessage, response_message, r
     await message.add_reaction(emoji="🔔")
     await message.add_reaction(emoji="🆕")
     await message.add_reaction(emoji="⭐")
+
+    if ctx.options.custom:
+        reaction = ["✅",helper.build_progress_bar(PROGRESS_BAR_LENGTH,PROGRESS_BAR_LENGTH)]
+        embed = await print_tracking_stages(timestamp, tracking,reaction,response_message)
+        await response.edit(embed)
+
+        log.info(f"*** | Finish Adding Reactions To Post | Custom Post | Message: {message.id} | ***")
+        return reaction
 
     current_progress = 3
 
