@@ -82,6 +82,9 @@ class Emoji(BaseModel):
 
     class Meta:
         table_name = 'EMOJI'
+        indexes = (
+            ((), True),
+        )
 
 class Event(BaseModel):
     creator = ForeignKeyField(column_name='CREATOR_ID', field='id', model=User, null=True)
@@ -129,7 +132,8 @@ class Roster(BaseModel):
 
 class RosterEntry(BaseModel):	
     created_at = DateTimeField(column_name='CREATED_AT', null=True)	
-    emoji = ForeignKeyField(column_name='EMOJI_ID', field='id', model=Emoji, null=True)	
+    emoji = ForeignKeyField(backref='EMOJI_emoji_set', column_name='EMOJI_ID', field='name', model=Emoji, null=True)
+    emoji_name = ForeignKeyField(backref='EMOJI_emoji_name_set', column_name='EMOJI_NAME', field='name', model=Emoji, null=True)
     id = IntegerField(column_name='ID', constraints=[SQL("DEFAULT nextval('\"ROSTER_ENTRY_ID_seq\"'::regclass)")])	
     main = BooleanField(column_name='MAIN', constraints=[SQL("DEFAULT false")], null=True)	
     roster = ForeignKeyField(column_name='ROSTER_ID', field='id', model=Roster)	

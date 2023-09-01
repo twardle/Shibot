@@ -3,7 +3,6 @@ from hikari import *
 import logging
 from datetime import datetime, timedelta
 import pytz
-from typing import TypedDict, Dict, List, Iterable
 from shibot import helper, model, GUILD_ID, BOT_USER_ID, DEV_BOT_USER_ID, PROGRESS_BAR_LENGTH, MAX_LOADING_PERCENT, SERVER_TIME_OFFSET, RED_X_EMOJI_ID, EMOJI_IDS, __version__
 
 bot_plugin = lightbulb.Plugin("Track")
@@ -16,7 +15,6 @@ error_handler = logging.FileHandler('log/shibot_error.log')
 error_handler.setLevel(logging.ERROR)
 log.addHandler(error_handler)
 
-red_x_emoji = None
 emoji_cache = {}
 
 ##########################################
@@ -55,16 +53,23 @@ async def build_tracking_info(ctx: lightbulb.Context, channel_id, message_id, ev
     if ctx.options.event_id :
         event = await bot_plugin.bot.rest.fetch_scheduled_event(ctx.guild_id,event_id)
         event_time = event.start_time.replace(tzinfo=pytz.UTC) - SERVER_TIME_OFFSET
+        scheduled_event = model.Event.get_or_none(guild=event.guild_id, id=event_id)
+        if not scheduled_event:
+            model.Event.create(creator=event.creator.id, description=event.description, guild=event.guild_id, id = event_id, name=event.name, start_time=event.start_time, status=event.status.value)
     
-    tracking = model.Track.get_or_none(channel=int(channel_id), message=int(message_id)) 
+    track:model.Track = model.Track.get_or_none(channel=int(channel_id), message=int(message_id)) 
     
-    if not tracking:
-        tracking = model.Track.create(channel=int(channel_id), message=int(message_id),creator=int(ctx.author.id), event=event_id)
+    if not track:
+        track = model.Track.create(channel=int(channel_id), message=int(message_id),creator=int(ctx.author.id), event=event_id)
     
-    roster = model.Roster.get_or_none(track=tracking.id)
+    if not track.event and event:
+        track.event = event.id
+        track.save()
+    
+    roster = model.Roster.get_or_none(track=track.id)
     
     if not roster:
-        model.Roster.create(track=tracking.id, updated_at=datetime.now())
+        model.Roster.create(track=track.id, updated_at=datetime.now())
     
     log.info(f"*** | Finish Building Tracking Info For Post | Message: {message_id} | ***")
     
@@ -77,19 +82,20 @@ async def build_tracking_info(ctx: lightbulb.Context, channel_id, message_id, ev
     return tracking
 
 async def add_reactions_to_post(ctx, message:PartialMessage, response_message, response, tracking,reaction):
-    global log
     log.info(f"*** | Start Adding Reactions To Post | Message: {message.id} | ***")
     timestamp = helper.generate_discord_timestamp(datetime.now())
-
-    iterator = await bot_plugin.bot.rest.fetch_reactions_for_emoji(channel=ctx.channel_id, message=message.id, emoji="🔔")
+    
     for message_reactions in message.reactions:
         if message_reactions.emoji == "🔔" and message_reactions.is_me:
+            await build_already_reacted(ctx,message,tracking,reaction,response,response_message)
+            
             reaction = ["✅",helper.build_progress_bar(PROGRESS_BAR_LENGTH,PROGRESS_BAR_LENGTH)]
+            timestamp = helper.generate_discord_timestamp(datetime.now())
             embed = await print_tracking_stages(timestamp, tracking,reaction,response_message)
             await response.edit(embed)
             log.info(f"*** | Finish Adding Reactions To Post | Already Added | Message: {message.id} | ***")
             return reaction
-
+    
     reaction_progress = 0
     current_progress = 0
     
@@ -99,6 +105,7 @@ async def add_reactions_to_post(ctx, message:PartialMessage, response_message, r
 
     if ctx.options.custom:
         reaction = ["✅",helper.build_progress_bar(PROGRESS_BAR_LENGTH,PROGRESS_BAR_LENGTH)]
+        timestamp = helper.generate_discord_timestamp(datetime.now())
         embed = await print_tracking_stages(timestamp, tracking,reaction,response_message)
         await response.edit(embed)
 
@@ -108,7 +115,8 @@ async def add_reactions_to_post(ctx, message:PartialMessage, response_message, r
     current_progress = 3
 
     reaction_progress = int((current_progress * PROGRESS_BAR_LENGTH) / (len(EMOJI_IDS)+3))
-    reaction = [red_x_emoji,helper.build_progress_bar(reaction_progress, PROGRESS_BAR_LENGTH)]
+    reaction = [emoji_cache.get(RED_X_EMOJI_ID),helper.build_progress_bar(reaction_progress, PROGRESS_BAR_LENGTH)]
+    timestamp = helper.generate_discord_timestamp(datetime.now())
     embed = await print_tracking_stages(timestamp, tracking,reaction,response_message)
     await response.edit(embed)
 
@@ -116,18 +124,58 @@ async def add_reactions_to_post(ctx, message:PartialMessage, response_message, r
         current_progress+= 1
         await message.add_reaction(emoji=emoji_cache.get(emoji_id))
         reaction_progress = (current_progress * PROGRESS_BAR_LENGTH) / (len(EMOJI_IDS)+3)
-        reaction = [red_x_emoji,helper.build_progress_bar(int(reaction_progress),PROGRESS_BAR_LENGTH)]
+        reaction = [emoji_cache.get(RED_X_EMOJI_ID),helper.build_progress_bar(int(reaction_progress),PROGRESS_BAR_LENGTH)]
+        timestamp = helper.generate_discord_timestamp(datetime.now())
         embed = await print_tracking_stages(timestamp, tracking,reaction,response_message)
         await response.edit(embed)
     log.info(f"*** | Finish Adding Reactions To Post | Message: {message.id} | ***")
 
     log.info(f"*** | Start Building Progress Bar For Post | Update Reaction Stage | Message: {message.id} | ***")
     reaction = ["✅",helper.build_progress_bar(PROGRESS_BAR_LENGTH,PROGRESS_BAR_LENGTH)]
+    timestamp = helper.generate_discord_timestamp(datetime.now())
     embed = await print_tracking_stages(timestamp, tracking,reaction,response_message)
     await response.edit(embed)
     log.info(f"*** | Finish Building Progress Bar For Post | Update Reaction Stage | Message: {message.id} | ***")
 
     return reaction
+
+async def build_already_reacted(ctx:lightbulb.Context, message:PartialMessage,  tracking,reaction,response,response_message):
+    current_progress = 0
+    track = model.Track.get(channel=int(ctx.channel_id), message=int(message.id)) 
+    roster = model.Roster.get(track=track.id)
+    
+    for emoji_id in EMOJI_IDS :
+        emoji:Emoji = emoji_cache.get(emoji_id)
+        users = await bot_plugin.app.rest.fetch_reactions_for_emoji(channel=ctx.channel_id, message=message.id, emoji=emoji_cache.get(emoji_id))
+        
+        for user in [user for user in users if user.id not in [BOT_USER_ID, DEV_BOT_USER_ID]] :
+            db_user = model.User.get_or_none(id=user.id)
+            
+            if not user:
+                model.User.create(
+                    id=user.id,
+                    username=user.username,
+                    mention=user.mention,
+                    is_bot=user.is_bot
+                )
+            
+            entry = model.RosterEntry.get_or_none(roster=roster.id, emoji=emoji_id, emoji_name=emoji.name)
+            
+            if not entry:
+                model.RosterEntry.create(
+                        emoji=emoji_id, 
+                        emoji_name=emoji.name,
+                        roster=roster.id,
+                        user=user.id,
+                        created_at=datetime.now()
+                    )
+        
+        current_progress+= 1
+        reaction_progress = (current_progress * PROGRESS_BAR_LENGTH) / (len(EMOJI_IDS))
+        reaction = [emoji_cache.get(RED_X_EMOJI_ID),helper.build_progress_bar(int(reaction_progress),PROGRESS_BAR_LENGTH)]
+        timestamp = helper.generate_discord_timestamp(datetime.now())
+        embed = await print_tracking_stages(timestamp, tracking,reaction,response_message)
+        await response.edit(embed)
 
 async def print_tracking_stages(timestamp, tracking_stage, reaction_stage, message: str) -> Embed:
     total_progress_amount = calc_total_progress(tracking_stage, reaction_stage)
@@ -141,7 +189,7 @@ async def print_tracking_stages(timestamp, tracking_stage, reaction_stage, messa
     progress_state += int((22 * int(reaction_stage[1].count('▓'))) / PROGRESS_BAR_LENGTH)
     
     if reaction_stage[0] != "✅":
-        embed.add_field(f"{red_x_emoji} | Working on Registering Event for Tracking.", message)
+        embed.add_field(f"{emoji_cache.get(RED_X_EMOJI_ID)} | Working on Registering Event for Tracking.", message)
     else: 
         embed.add_field("✅ | Finished Registering Event for Tracking.", message)
     
@@ -228,8 +276,8 @@ async def track_post(ctx: lightbulb.Context) -> None:
         response_message = f"{response_message} for https://discord.com/events/{ctx.guild_id}/{event_id}"
     
     discord_timestamp = helper.generate_discord_timestamp(datetime.now())
-    tracking = [red_x_emoji,helper.build_progress_bar(0,PROGRESS_BAR_LENGTH)]
-    reaction = [red_x_emoji,helper.build_progress_bar(0,PROGRESS_BAR_LENGTH)]
+    tracking = [emoji_cache.get(RED_X_EMOJI_ID),helper.build_progress_bar(0,PROGRESS_BAR_LENGTH)]
+    reaction = [emoji_cache.get(RED_X_EMOJI_ID),helper.build_progress_bar(0,PROGRESS_BAR_LENGTH)]
     embed = await print_tracking_stages(discord_timestamp,tracking,reaction,response_message)
     response = await ctx.respond(embed,flags=MessageFlag.EPHEMERAL)
     
@@ -238,6 +286,35 @@ async def track_post(ctx: lightbulb.Context) -> None:
     
     now = datetime.now(pytz.timezone('America/New_York')).strftime("%m/%d/%Y %I:%M:%S %p")
     log.info(f"*** | Authorized Command Complete | {ctx.author} | {ctx.get_channel().name} | Executed /{ctx.command.name} | ***")
+
+@bot_plugin.command
+@lightbulb.option(
+    "message_id",
+    "Associates this post with a specific message.",
+    type=str,
+    required=True,
+)
+@lightbulb.command("untrack", "Removes tracking for the associated post")
+@lightbulb.implements(lightbulb.SlashCommand)
+async def untrack_post(ctx: lightbulb.Context) -> None:
+    
+    message_id : str = ctx.options.message_id
+    if "https://discord.com/" in message_id :
+        message_id = message_id.split("/")[-1]
+
+    if track := model.Track.get_or_none(
+        channel=int(ctx.channel_id), message=int(message_id)
+    ):
+        track.delete_instance()
+    
+    message:PartialMessage = await bot_plugin.app.rest.fetch_message(channel=ctx.channel_id, message=message_id)
+    
+    link = message.make_link(guild=ctx.get_guild())
+    
+    embed = Embed(title="Untracked Message", description=f"{link} will no longer be tracked", color="#ff0000")
+    embed.set_footer("/track can be executed to re-enable tracking on this event.")
+    await ctx.respond(embed,flags=MessageFlag.EPHEMERAL)
+
 
 async def build_db_entities(ctx: lightbulb.Context, message_id: str) -> PartialMessage:
     guild_owner:model.User = model.User.get_or_none(id=int(ctx.get_guild().owner_id))
@@ -316,14 +393,12 @@ async def build_db_entities(ctx: lightbulb.Context, message_id: str) -> PartialM
                 edited_at=guild_message.edited_timestamp, 
                 guild=ctx.guild_id
             )
-    
-    red_x_emoji = await bot_plugin.bot.rest.fetch_emoji(guild=GUILD_ID,emoji=RED_X_EMOJI_ID)
 
     emojis = await bot_plugin.bot.rest.fetch_guild_emojis(guild=GUILD_ID)
     for emoji in emojis :
         emoji_id = str(emoji.id)
-        if emoji_id in EMOJI_IDS :
-            emoji_db = model.Emoji.get_or_none(id=int(emoji_id))
+        if emoji_id in EMOJI_IDS or RED_X_EMOJI_ID :
+            emoji_db = model.Emoji.get_or_none(id=int(emoji_id),name=str(emoji.name))
             
             if not emoji_db:
                 model.Emoji.create(

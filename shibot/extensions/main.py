@@ -2,9 +2,8 @@ from shibot import helper, model, GUILD_ID, BOT_USER_ID, DEV_BOT_USER_ID, PROGRE
 import lightbulb
 from hikari import *
 import logging
-from datetime import datetime, timedelta
-import pytz
-from typing import TypedDict, Dict, List, Iterable
+from datetime import datetime
+from typing import List, Iterable
 from hikari.api.special_endpoints import MessageActionRowBuilder
 
 bot_plugin = lightbulb.Plugin("Main")
@@ -22,37 +21,41 @@ emoji_cache = {}
 async def handle_response_main(ctx:lightbulb.Context, bot: lightbulb.BotApp,author: User,message: Message, track: model.Track, footer, ) -> None:
     with bot.stream(InteractionCreateEvent, 120).filter(
 
-                lambda e: (isinstance(e.interaction, ComponentInteraction) and e.interaction.user == author and e.interaction.message == message)
-            ) as stream:
+                        lambda e: (isinstance(e.interaction, ComponentInteraction) and e.interaction.user == author and e.interaction.message == message)
+                    ) as stream:
         async for event in stream:
             log.info(f"*** | Start Handling Response For Main Command | Message: {track.message} | User: {author.username} | ***")
             cid = event.interaction.custom_id
-            
+
             main = model.Emoji.get(name=cid)
-            
+
             emoji = emoji_cache.get(main.id)
             if not emoji:
                 emoji = await bot_plugin.bot.rest.fetch_emoji(guild=ctx.get_guild().id,emoji=main.id)
                 emoji_cache.update({main.id:emoji})
-            
+
             main_name = main.name.upper().replace("_", " ")
-            
-            user_mentions = await bot_plugin.bot.rest.fetch_reactions_for_emoji(track.channel, message=track.message, emoji=emoji)
-            
-            if user_mention := [
-                user for user in user_mentions if user.id == author.id
-            ]:
-                roster:model.Roster = model.Roster.get(track=track.id)
-                
-                old_main:model.RosterEntry = model.RosterEntry.get_or_none(roster= roster.id,user=author.id, main=True)
-                old_main.main=False
-                old_main.updated_at=datetime.now()
-                old_main.save()
-                
-                entry:model.RosterEntry = model.RosterEntry.get(roster= roster.id,user=author.id, emoji=main.id)
+
+            roster:model.Roster = model.Roster.get(track=track.id)
+
+            if entry := model.RosterEntry.get_or_none(
+                roster=roster.id,
+                user=author.id,
+                emoji=main.id,
+                emoji_name=main.name,
+            ):
+
+                if old_main := model.RosterEntry.get_or_none(
+                    roster=roster.id, user=author.id, main=True
+                ):
+                    old_main.main=False
+                    old_main.updated_at=datetime.now()
+                    old_main.save()
+
                 entry.main = True
                 entry.updated_at=datetime.now()
-                entry.main=True;
+                entry.main=True
+                entry.save()
                 embed = Embed(title=main_name,description=f"Main set to {emoji} {main_name}",)
             else:
                 embed = Embed(title="Invalid Main Attempted",description=f"Please react first | {emoji} {main_name}.",color="#880808")

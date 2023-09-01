@@ -29,12 +29,12 @@ bot_plugin = lightbulb.Plugin("Release")
 @lightbulb.implements(lightbulb.SlashCommand)
 async def load(ctx:lightbulb.Context) -> None:
     log.info("*** | Start Release Notes | ***")
-    embed = Embed(title="Release Notes", color="#00ffff", url="https://github.com/twardle/DiscordBot_Hikari/blob/master")
-    embed.add_field("Safe Reboot","*Shibot will now remember things, even after unexpected naps!*")
-    embed.add_field("Performance Enhancements","*Shibot's zoomies are off the charts thanks to being a bit more lazy!*")
-    embed.add_field("Caching Cleanup","*Shibot now only remembers the important things...*")
-    embed.add_field("Logging Handling","*Shibot sometimes makes mistakes, and that's ok.*")
-    embed.set_thumbnail("https://github.com/twardle/DiscordBot_Hikari/blob/master/Shiba_logo.png?raw=true")
+    embed = Embed(title="Release Notes", color="#00ffff", url="https://github.com/twardle/DiscordBot_Hikari/blob/database")
+    embed.add_field("`Database Integration`","*Ashebot's brainpower is off the charts!*")
+    embed.add_field("`Listener Integrations`","*Ashebot won't get confused when things go missing anymore... probably.*")
+    embed.add_field("`New Commands!`","*Ashebot got some new toys!*")
+    embed.add_field("`More Cleanup`","*Ashebot's room has never been cleaner, let's hope it stays this way...*")
+    embed.set_thumbnail("https://github.com/twardle/DiscordBot_Hikari/blob/database/Shiba_dev_logo.png?raw=true")
     embed.set_footer(f"Shibot {__version__}")
     
     if ctx.options.ephemeral :
